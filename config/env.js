@@ -1,0 +1,109 @@
+/**
+ * Environment Configuration and Validation
+ * 
+ * This module handles loading and validating environment variables,
+ * providing safe defaults and clear error messages for missing required values.
+ */
+
+require('dotenv').config();
+
+/**
+ * Validates that a required environment variable is set
+ * 
+ * @param {string} varName - The name of the environment variable
+ * @param {string} description - Human-readable description of the variable
+ * @throws {Error} If the required variable is not set
+ */
+function requireEnvVar(varName, description) {
+  const value = process.env[varName];
+  if (!value || value.trim() === '') {
+    throw new Error(
+      `Missing required environment variable: ${varName}\n` +
+      `Description: ${description}\n` +
+      `Please set this in your .env file.`
+    );
+  }
+  return value.trim();
+}
+
+/**
+ * Gets an optional environment variable with a default value
+ * 
+ * @param {string} varName - The name of the environment variable
+ * @param {*} defaultValue - The default value if not set
+ * @returns {*} The environment variable value or default
+ */
+function getEnvVar(varName, defaultValue) {
+  const value = process.env[varName];
+  return value && value.trim() !== '' ? value.trim() : defaultValue;
+}
+
+/**
+ * Application configuration object
+ * Loads and validates all required environment variables
+ */
+const config = {
+  /**
+   * AniList username for fetching anime lists
+   * @type {string}
+   */
+  anilistUsername: requireEnvVar(
+    'ANILIST_USERNAME',
+    'Your AniList username (must be publicly visible)'
+  ),
+
+  /**
+   * Port number for the Express server
+   * @type {number}
+   */
+  port: parseInt(getEnvVar('PORT', '3000'), 10),
+
+  /**
+   * Node environment (development, production, etc.)
+   * @type {string}
+   */
+  nodeEnv: getEnvVar('NODE_ENV', 'development'),
+
+  /**
+   * Whether the app is running in development mode
+   * @type {boolean}
+   */
+  isDevelopment: getEnvVar('NODE_ENV', 'development') === 'development'
+};
+
+/**
+ * Validates the entire configuration
+ * Checks for logical errors and invalid values
+ * 
+ * @throws {Error} If configuration is invalid
+ */
+function validateConfig() {
+  // Validate port number
+  if (isNaN(config.port) || config.port < 1 || config.port > 65535) {
+    throw new Error(`Invalid PORT value: ${process.env.PORT}. Must be between 1 and 65535.`);
+  }
+
+  // Validate username format (basic check)
+  if (config.anilistUsername.length < 2) {
+    throw new Error('ANILIST_USERNAME must be at least 2 characters long.');
+  }
+
+  console.log('✓ Configuration validated successfully');
+  console.log(`  - AniList Username: ${config.anilistUsername}`);
+  console.log(`  - Port: ${config.port}`);
+  console.log(`  - Environment: ${config.nodeEnv}`);
+}
+
+// Validate configuration on module load
+try {
+  validateConfig();
+} catch (error) {
+  console.error('\n❌ Configuration Error:');
+  console.error(error.message);
+  console.error('\nPlease check your .env file and try again.\n');
+  process.exit(1);
+}
+
+module.exports = config;
+
+// Made with Bob
