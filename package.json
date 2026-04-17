@@ -1,6 +1,6 @@
 {
   "name": "anilist-stremio",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Stremio extension to sync AniList currently watching anime to library",
   "main": "index.js",
   "scripts": {
