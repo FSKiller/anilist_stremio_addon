@@ -53,9 +53,9 @@ const manifest = {
  * const catalog = await getCatalog("anime", "anilist.watching");
  * // Returns: { metas: [{ id: "anilist:12345", name: "...", ... }] }
  */
-async function getCatalog(type, id, extra) {
+async function getCatalog(type, id, extra, username) {
   try {
-    console.log(`Catalog request - Type: ${type}, ID: ${id}, Extra: ${extra || 'none'}`);
+    console.log(`Catalog request - Type: ${type}, ID: ${id}, Extra: ${extra || 'none'}, User: ${username}`);
 
     // Handle AniList currently watching catalog
     if (id === 'anilist.watching') {
@@ -66,7 +66,7 @@ async function getCatalog(type, id, extra) {
       }
 
       // Fetch currently watching anime from AniList
-      const metas = await anilistService.getCurrentlyWatchingAnime();
+      const metas = await anilistService.getCurrentlyWatchingAnime(username);
       
       console.log(`Returning ${metas.length} items for catalog "${id}"`);
       return { metas };
@@ -104,7 +104,7 @@ async function getCatalog(type, id, extra) {
  * const meta = await getMeta("anime", "anilist:12345");
  * // Returns: { meta: { id: "anilist:12345", name: "...", ... } }
  */
-async function getMeta(type, id) {
+async function getMeta(type, id, username) {
   try {
     console.log(`Meta request - Type: ${type}, ID: ${id}`);
 

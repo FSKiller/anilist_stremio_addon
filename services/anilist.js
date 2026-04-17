@@ -9,7 +9,6 @@
 
 const axios = require('axios');
 const { ANILIST_API_URL, ANILIST_STATUS, POSTER_SHAPES } = require('../config/constants');
-const config = require('../config/env');
 
 /**
  * GraphQL query to fetch user's currently watching anime
@@ -78,16 +77,16 @@ const CURRENTLY_WATCHING_QUERY = `
  * const animeList = await getCurrentlyWatchingAnime();
  * // Returns: [{ id: "anilist:12345", name: "Attack on Titan", ... }]
  */
-async function getCurrentlyWatchingAnime() {
+async function getCurrentlyWatchingAnime(username) {
   try {
-    console.log(`Fetching currently watching anime for user: ${config.anilistUsername}`);
+    console.log(`Fetching currently watching anime for user: ${username}`);
     
     // Make GraphQL request to AniList API
     const response = await axios.post(
       ANILIST_API_URL,
       {
         query: CURRENTLY_WATCHING_QUERY,
-        variables: { userName: config.anilistUsername }
+        variables: { userName: username }
       },
       {
         headers: {
@@ -128,7 +127,7 @@ async function getCurrentlyWatchingAnime() {
       console.error(`AniList API error (${status}): ${message}`);
       
       if (status === 404) {
-        throw new Error(`AniList user "${config.anilistUsername}" not found. Please check your username.`);
+        throw new Error(`AniList user "${username}" not found. Please check your username.`);
       } else if (status === 429) {
         throw new Error('AniList API rate limit exceeded. Please try again later.');
       } else {

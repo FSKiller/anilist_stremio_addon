@@ -44,15 +44,6 @@ function getEnvVar(varName, defaultValue) {
  */
 const config = {
   /**
-   * AniList username for fetching anime lists
-   * @type {string}
-   */
-  anilistUsername: requireEnvVar(
-    'ANILIST_USERNAME',
-    'Your AniList username (must be publicly visible)'
-  ),
-
-  /**
    * Port number for the Express server
    * @type {number}
    */
@@ -83,13 +74,7 @@ function validateConfig() {
     throw new Error(`Invalid PORT value: ${process.env.PORT}. Must be between 1 and 65535.`);
   }
 
-  // Validate username format (basic check)
-  if (config.anilistUsername.length < 2) {
-    throw new Error('ANILIST_USERNAME must be at least 2 characters long.');
-  }
-
   console.log('✓ Configuration validated successfully');
-  console.log(`  - AniList Username: ${config.anilistUsername}`);
   console.log(`  - Port: ${config.port}`);
   console.log(`  - Environment: ${config.nodeEnv}`);
 }
