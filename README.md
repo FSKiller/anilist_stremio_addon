@@ -1,6 +1,6 @@
-# AniList Stremio Addon
+# Anime Stremio Addon
 
-A Stremio addon that automatically syncs your AniList "Currently Watching" anime to your Stremio library, providing seamless integration between your AniList account and Stremio.
+A self-hosted Stremio addon that syncs your anime watch lists from **AniList**, **MyAnimeList**, and **IMDB** directly into Stremio, with automatic episode progress updates.
 
 ## 📋 Table of Contents
 
@@ -12,405 +12,218 @@ A Stremio addon that automatically syncs your AniList "Currently Watching" anime
 - [Project Structure](#-project-structure)
 - [Development](#-development)
 - [Troubleshooting](#-troubleshooting)
-- [API Documentation](#-api-documentation)
 - [Contributing](#-contributing)
-- [License](#-license)
 
 ## ✨ Features
 
-- **Automatic Sync**: Fetches all anime from your AniList "Currently Watching" status
-- **Rich Metadata**: Displays comprehensive anime information including:
-  - High-quality poster images
-  - Detailed descriptions
-  - Genre tags
-  - Ratings (converted from AniList scores)
-  - Release year
-  - Watch progress
-- **Progress Updates**: Automatically updates your watch progress on AniList/MyAnimeList when you finish episodes in Stremio (requires authentication setup)
-- **Real-time Updates**: Catalog refreshes each time you open it in Stremio
-- **Error Handling**: Robust error handling with helpful error messages
-- **Easy Setup**: Simple configuration via environment variables
+- **Multi-service support**: AniList, MyAnimeList, and IMDB in one addon
+- **All watch statuses**: Currently Watching, On Hold, Plan to Watch, Dropped, Completed, Rewatching
+- **Rich metadata**: Poster images, descriptions, genre tags, ratings, release year, watch progress
+- **Automatic progress sync**: After watching an episode for 5+ minutes in Stremio, your progress is updated on AniList or MAL automatically
+- **Single-button OAuth**: Connect AniList and MAL with one click — no username typing required
+- **Combined addon**: Install all configured services as a single Stremio addon
+- **Self-hosted**: Your credentials stay on your server
 
 ## 📦 Prerequisites
 
-Before you begin, ensure you have the following installed:
-
-- **Node.js** (v14 or higher) - [Download here](https://nodejs.org/)
-- **npm** (comes with Node.js)
-- **AniList Account** - [Create one here](https://anilist.co/)
-- **Stremio** - [Download here](https://www.stremio.com/)
-
-### AniList Requirements
-
-- Your AniList profile must be **publicly visible**
-- You should have at least one anime in your "Currently Watching" list
-- **For progress updates**: OAuth app registration and user authentication
-
-### MyAnimeList Requirements
-
-- Your MAL profile must be **publicly visible**
-- You should have at least one anime in your "Currently Watching" list
-- **For progress updates**: OAuth app registration and user authentication
+- **Node.js** v14 or higher — [nodejs.org](https://nodejs.org/)
+- **Stremio** — [stremio.com](https://www.stremio.com/)
+- At least one of: an AniList account, a MAL account, or an IMDB account
 
 ## 🚀 Installation
 
-### 1. Clone or Download the Repository
+### Automated (Linux/LXC — recommended)
+
+Clone the repository and run the installer as root:
 
 ```bash
 git clone <repository-url>
 cd anilist-stremio-addon
+sudo bash install.sh
 ```
 
-### 2. Install Dependencies
+Options:
+
+```
+-p, --port PORT   Port to run on (default: 3000)
+-u, --user USER   System user to run the service as (default: addon)
+-d, --dir DIR     Install directory (default: /opt/anilist-stremio)
+```
+
+The installer will:
+1. Install Node.js LTS if not present
+2. Create a dedicated system user
+3. Copy files and install dependencies
+4. Write a `.env` file
+5. Create and start a `systemd` service (`anilist-stremio`)
+
+To update an existing installation:
 
 ```bash
+sudo bash update.sh
+```
+
+### Manual
+
+```bash
+git clone <repository-url>
+cd anilist-stremio-addon
 npm install
-```
-
-This will install all required packages:
-- `express` - Web server framework
-- `axios` - HTTP client for API requests
-- `dotenv` - Environment variable management
-
-### 3. Configure Environment Variables
-
-Create a `.env` file in the root directory:
-
-```bash
-cp .env.example .env
-```
-
-Edit the `.env` file with your settings:
-
-```env
-# Server port (optional, defaults to 3000)
-PORT=3000
-
-# Node environment (optional, defaults to development)
-NODE_ENV=development
-
-# MyAnimeList API Client ID (optional, for MAL support)
-MAL_CLIENT_ID=your_mal_client_id
-
-# AniList OAuth (optional, for progress updates)
-ANILIST_CLIENT_ID=your_anilist_client_id
-ANILIST_CLIENT_SECRET=your_anilist_client_secret
-
-# MyAnimeList OAuth (optional, for progress updates)
-MAL_OAUTH_CLIENT_ID=your_mal_oauth_client_id
-MAL_OAUTH_CLIENT_SECRET=your_mal_oauth_client_secret
-```
-
-#### OAuth Setup for Progress Updates
-
-To enable automatic progress updates when watching episodes in Stremio, each user needs to:
-
-1. **Register OAuth applications** on both platforms:
-   - **AniList**: Go to [AniList Developer Settings](https://anilist.co/settings/developer)
-   - **MyAnimeList**: Go to [MAL API Config](https://myanimelist.net/apiconfig)
-
-2. **Configure redirect URIs** (replace `your-domain.com` with your actual domain):
-   - AniList: `http://your-domain.com/auth/anilist/YOUR_USERNAME/callback`
-   - MyAnimeList: `http://your-domain.com/auth/mal/YOUR_USERNAME/callback`
-
-3. **Enter credentials** on the web interface:
-   - Visit `http://your-domain.com`
-   - Enter your username and OAuth Client ID/Secret
-   - Click "Authenticate" to enable progress updates
-
-**Note**: Each user provides their own OAuth credentials - no server-wide configuration needed!
-
-### 4. Start the Server
-
-For production:
-```bash
+cp .env.example .env   # edit as needed
 npm start
 ```
 
-For development (with auto-restart on file changes):
-```bash
-npm run dev
-```
-
-You should see output similar to:
-
-```
-============================================================
-🚀 Stremio AniList Addon Server Started
-============================================================
-📡 Server listening on port 3000
-👤 AniList user: your_username
-🌍 Environment: development
-
-📦 Installation URL:
-   http://localhost:3000/manifest.json
-
-📖 Instructions:
-   1. Open Stremio
-   2. Go to Settings → Addons
-   3. Click "Install from URL"
-   4. Paste the installation URL above
-   5. Click "Install"
-============================================================
-```
-
-### 5. Install in Stremio
-
-1. Open **Stremio** application
-2. Navigate to **Settings** → **Addons**
-3. Click **"Install from URL"** (or the "+" button)
-4. Enter: `http://localhost:3000/manifest.json`
-5. Click **"Install"**
-
-The addon should now appear in your installed addons list!
-
 ## ⚙️ Configuration
 
-### Environment Variables
+All configuration is done via environment variables in `.env`.
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ANILIST_USERNAME` | Yes | - | Your AniList username (must be publicly visible) |
-| `PORT` | No | `3000` | Port number for the server |
-| `NODE_ENV` | No | `development` | Environment mode (`development` or `production`) |
+|---|---|---|---|
+| `PORT` | No | `3000` | HTTP port for the server |
+| `NODE_ENV` | No | `development` | `development` or `production` |
+| `ANILIST_CLIENT_ID` | No* | — | AniList OAuth Client ID |
+| `ANILIST_CLIENT_SECRET` | No* | — | AniList OAuth Client Secret |
+| `MAL_CLIENT_ID` | No* | — | MAL API Client ID (enables MAL service) |
+| `MAL_CLIENT_SECRET` | No* | — | MAL OAuth Client Secret (enables progress sync) |
 
-### Configuration Files
+\* Required only if you want to use that service.
 
-The project uses a modular configuration system:
+### Setting Up OAuth Apps
 
-- **`config/constants.js`**: Application constants and default values
-- **`config/env.js`**: Environment variable loading and validation
+OAuth is needed to enable the login buttons on the configure page and automatic progress updates.
+
+#### AniList
+
+1. Go to [AniList Developer Settings](https://anilist.co/settings/developer) → **Add Client**
+2. Set the redirect URI to: `http://your-server:PORT/auth/anilist/callback`
+3. Copy the **Client ID** and **Client Secret** into `.env`:
+   ```env
+   ANILIST_CLIENT_ID=your_client_id
+   ANILIST_CLIENT_SECRET=your_client_secret
+   ```
+
+#### MyAnimeList
+
+1. Go to [MAL API Config](https://myanimelist.net/apiconfig) → **Create ID**
+2. Set **App Type** to `web` and the redirect URI to: `http://your-server:PORT/auth/mal/callback`
+3. Copy the **Client ID** and **Client Secret** into `.env`:
+   ```env
+   MAL_CLIENT_ID=your_client_id
+   MAL_CLIENT_SECRET=your_client_secret
+   ```
+
+> **Note**: If you only set `MAL_CLIENT_ID` (without the secret), the MAL catalog is available but the login button and progress sync are disabled.
+
+Restart the service after editing `.env`:
+```bash
+systemctl restart anilist-stremio
+```
 
 ## 📖 Usage
 
-### Viewing Your Anime
+### Setting Up Your Addon URL
 
-1. Open Stremio
-2. Navigate to the **"Discover"** section
-3. Look for **"AniList - Currently Watching"** catalog
-4. Browse your currently watching anime
+1. Open the configure page: `http://your-server:PORT/`
+2. For **AniList**: click **Login with AniList** → authorise → your addon URL is shown automatically
+3. For **MyAnimeList**: click **Connect to MyAnimeList** → authorise → your addon URL is shown automatically
+4. For **IMDB**: enter your IMDB User ID (e.g. `ur12345678`) found in your [IMDB profile URL](https://www.imdb.com/user/)
+5. Copy the URL or click **Open in Stremio** to install directly
 
-### Updating Your List
+If you use more than one service, an **Install in Stremio** button appears at the bottom to install all of them as a single combined addon.
 
-The addon fetches fresh data from AniList each time you open the catalog in Stremio. To see updates:
+### Episode Progress Sync
 
-1. Update your anime list on AniList
-2. Refresh the catalog in Stremio (close and reopen it)
+Once authenticated, the addon tracks what you play in Stremio. After the same episode has been open for **5 minutes**, your progress is updated on AniList or MAL. No manual action needed.
 
-### Watch Progress
+### Watch Statuses Available
 
-Anime that you've started watching (progress > 0) will be marked as "watched" in Stremio.
+Each service exposes all statuses as separate catalogs in Stremio:
+
+- Currently Watching
+- On Hold
+- Plan to Watch
+- Dropped
+- Completed
+- Rewatching
 
 ## 📁 Project Structure
 
 ```
-anilist-stremio-addon/
+anime-stremio-addon/
+├── addon.js              # Stremio protocol — manifest, catalog, meta, stream handlers
+├── index.js              # Express server, routes, and OAuth flows
+├── package.json
+├── install.sh            # Automated Linux installer
+├── update.sh             # Automated updater
 ├── config/
-│   ├── constants.js      # Application constants and configuration
-│   └── env.js            # Environment variable validation
-├── services/
-│   └── anilist.js        # AniList API integration
-├── addon.js              # Stremio addon interface
-├── index.js              # Express server and routes
-├── package.json          # Project dependencies
-├── .env.example          # Example environment configuration
-└── README.md             # This file
+│   ├── constants.js      # Manifest definitions, API URLs, catalog config
+│   ├── env.js            # Environment variable loading and validation
+│   └── tokens.js         # OAuth token storage and watch-session tracking
+├── data/
+│   └── tokens.json       # Persisted OAuth tokens (gitignored)
+└── services/
+    ├── anilist.js        # AniList GraphQL API integration
+    ├── imdb.js           # IMDB watchlist integration
+    └── mal.js            # MyAnimeList REST API integration
 ```
-
-### Key Components
-
-- **`index.js`**: Main server file that handles HTTP requests from Stremio
-- **`addon.js`**: Defines the addon manifest and request handlers
-- **`services/anilist.js`**: Handles all AniList API interactions
-- **`config/constants.js`**: Centralized configuration constants
-- **`config/env.js`**: Environment variable validation and loading
 
 ## 🛠️ Development
 
-### Running in Development Mode
-
 ```bash
-npm run dev
+npm run dev   # starts nodemon for auto-restart on file changes
 ```
 
-This uses `nodemon` to automatically restart the server when files change.
+Set `NODE_ENV=development` in `.env` to enable per-request logging.
 
-### Code Structure
+### Adding a new catalog status
 
-The codebase follows these principles:
+1. Add the status mapping in `addon.js` (`ANILIST_STATUS_MAP` / `MAL_STATUS_MAP`)
+2. Add the catalog entry in `config/constants.js`
 
-- **Modular Design**: Separated concerns (server, addon logic, API service)
-- **Comprehensive Documentation**: JSDoc comments on all functions
-- **Error Handling**: Robust error handling with helpful messages
-- **Configuration Management**: Centralized constants and environment validation
+### Adding a new service
 
-### Adding New Features
-
-1. **New Catalogs**: Add to `CATALOGS` in `config/constants.js`
-2. **New API Calls**: Add functions to `services/anilist.js`
-3. **New Routes**: Add to `index.js` following existing patterns
+1. Create `services/<service>.js` following the existing pattern
+2. Add the manifest in `config/constants.js`
+3. Wire up routes and handler calls in `index.js` and `addon.js`
 
 ## 🔧 Troubleshooting
 
-### Common Issues
+### The MAL or AniList login button does nothing
 
-#### "Missing required environment variable: ANILIST_USERNAME"
+Ensure the matching `*_CLIENT_ID` and `*_CLIENT_SECRET` env vars are set and the service has been restarted. The button only appears when both are configured.
 
-**Solution**: Create a `.env` file with your AniList username:
+### Progress updates are not syncing
+
+- Confirm you completed OAuth (the configure page should show "✅ Authenticated")
+- Progress is only sent after the same episode has been open for 5 minutes
+- Check logs: `journalctl -u anilist-stremio -f`
+
+### Redirect URI mismatch error during OAuth
+
+The redirect URI registered in your OAuth app must exactly match the server address:
+- AniList: `http://your-server:PORT/auth/anilist/callback`
+- MAL: `http://your-server:PORT/auth/mal/callback`
+
+### Service won't start
+
+```bash
+journalctl -u anilist-stremio -n 50
+```
+
+Common causes: invalid `PORT` value in `.env`, missing `data/` directory write permission.
+
+### Debug logging
+
 ```env
-ANILIST_USERNAME=your_username
+NODE_ENV=development
 ```
 
-#### "AniList user not found"
-
-**Possible causes**:
-- Username is misspelled
-- AniList profile is set to private
-
-**Solution**: 
-1. Verify your username on [AniList.co](https://anilist.co/)
-2. Ensure your profile is public in AniList settings
-
-#### "No currently watching anime found"
-
-**Possible causes**:
-- You don't have any anime marked as "Currently Watching"
-- Your list is private
-
-**Solution**: 
-1. Add anime to your "Currently Watching" list on AniList
-2. Make sure your anime list is publicly visible
-
-#### "Unable to connect to AniList API"
-
-**Possible causes**:
-- No internet connection
-- AniList API is down
-- Firewall blocking requests
-
-**Solution**: 
-1. Check your internet connection
-2. Visit [AniList.co](https://anilist.co/) to verify the site is accessible
-3. Check firewall settings
-
-#### Addon not appearing in Stremio
-
-**Solution**:
-1. Ensure the server is running (check terminal output)
-2. Verify the URL is correct: `http://localhost:3000/manifest.json`
-3. Try restarting Stremio
-4. Check if port 3000 is available (or change PORT in `.env`)
-
-### Debug Mode
-
-For detailed logging, ensure `NODE_ENV=development` in your `.env` file. This enables:
-- Request logging
-- Detailed error messages
-- API call logging
-
-### Getting Help
-
-If you encounter issues:
-
-1. Check the server console output for error messages
-2. Verify your `.env` configuration
-3. Ensure your AniList profile is public
-4. Check the [Troubleshooting](#-troubleshooting) section above
-
-## 📚 API Documentation
-
-### Endpoints
-
-#### GET /manifest.json
-
-Returns the addon manifest.
-
-**Response:**
-```json
-{
-  "id": "community.anilist-stremio",
-  "version": "1.0.0",
-  "name": "AniList Sync",
-  "description": "Syncs your AniList Currently Watching anime to Stremio library",
-  "types": ["anime"],
-  "catalogs": [...],
-  "resources": ["catalog", "meta"]
-}
-```
-
-#### GET /catalog/:type/:id.json
-
-Returns catalog content.
-
-**Parameters:**
-- `type`: Content type (e.g., "anime")
-- `id`: Catalog ID (e.g., "anilist.watching")
-
-**Response:**
-```json
-{
-  "metas": [
-    {
-      "id": "anilist:12345",
-      "type": "anime",
-      "name": "Attack on Titan",
-      "poster": "https://...",
-      "description": "...",
-      "genres": ["Action", "Drama"],
-      "imdbRating": "8.5",
-      "year": 2013
-    }
-  ]
-}
-```
-
-#### GET /meta/:type/:id.json
-
-Returns detailed metadata for a specific item.
-
-**Parameters:**
-- `type`: Content type (e.g., "anime")
-- `id`: Content ID (e.g., "anilist:12345")
-
-**Response:**
-```json
-{
-  "meta": {
-    "id": "anilist:12345",
-    "type": "anime",
-    "name": "Attack on Titan",
-    ...
-  }
-}
-```
+This prints every incoming request and API call to the journal.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Here's how you can help:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Code Style
-
-- Use JSDoc comments for all functions
-- Follow existing code structure and patterns
-- Add error handling for new features
-- Update documentation for significant changes
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- [AniList](https://anilist.co/) for providing the GraphQL API
-- [Stremio](https://www.stremio.com/) for the addon platform
-- The open-source community for inspiration and tools
-
----
-
-**Note**: This addon requires the server to be running while using it in Stremio. For persistent usage, consider deploying to a cloud service like Heroku, Railway, or DigitalOcean.
+MIT

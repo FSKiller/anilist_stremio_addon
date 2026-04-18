@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# update.sh — Update an existing AniList Stremio Addon installation
+# update.sh — Update an existing Anime Stremio Addon installation
 # Usage: bash update.sh [options]
 #   -d, --dir DIR         Install directory (default: /opt/anilist-stremio)
 #   -h, --help            Show this help message
@@ -41,7 +41,7 @@ SERVICE_USER=$(stat -c '%U' "$INSTALL_DIR/.env")
 
 echo ""
 echo "============================================================"
-echo " AniList Stremio Addon — Updater"
+echo " Anime Stremio Addon — Updater"
 echo "============================================================"
 info "Install directory : $INSTALL_DIR"
 info "Service user      : $SERVICE_USER"

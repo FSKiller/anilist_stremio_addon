@@ -1,14 +1,55 @@
 # Project Improvements Summary
 
-This document outlines all the improvements made to the AniList Stremio Addon project to enhance code quality, maintainability, and documentation.
+This document outlines all the improvements made to the Anime Stremio Addon project.
 
 ## 📊 Overview
 
-**Date**: 2026-04-18  
-**Scope**: Implemented OAuth authentication and progress update functionality  
-**Impact**: Complete progress syncing between Stremio and external anime tracking services
+**Date**: 2026-04-19
+**Scope**: MAL username-free OAuth, deferred episode progress sync
+**Impact**: Simpler onboarding for MAL; episode progress actually updates on MAL/AniList
 
-## 🎯 Improvements Made
+---
+
+## 🎯 Improvements (2026-04-19)
+
+### 7. MAL Username-Free OAuth
+
+#### Problem
+The MAL section of the configure page required users to type their MAL username before they could authenticate. This was redundant — the username is already known to MAL once the user logs in.
+
+#### Solution
+- Replaced the username text input + separate auth button with a single **"Connect to MyAnimeList"** button, matching the AniList UX
+- Added `GET /users/@me` call in `services/mal.js` (`getAuthenticatedUsername`) to discover the username from the access token after OAuth completes
+- Changed OAuth routes: `/auth/mal/connect` starts the PKCE flow (no username in URL), `/auth/mal/callback` exchanges the code, calls `@me`, stores tokens, then redirects to `/configure#mal_username={username}`
+- PKCE verifier storage moved from `tokens.json` (keyed by username) to an **in-memory map** keyed by a random session ID, auto-expiring after 10 minutes. This removes the requirement to know the username before OAuth starts.
+- The configure page reads `#mal_username` from the URL hash on return (same pattern as AniList's `#anilist_token`) and shows the addon URL and auth status automatically.
+- `localStorage` still persists the discovered username so returning users see their addon URL immediately on page load.
+
+#### Files Changed
+- `index.js` — HTML form, frontend JS, OAuth routes
+- `services/mal.js` — `getAuthenticatedUsername()` added
+- `config/tokens.js` — PKCE verifier storage rewritten to in-memory
+
+---
+
+### 8. Deferred Episode Progress Sync
+
+#### Problem
+Stremio calls the `/stream/` endpoint exactly **once** when a user selects an episode. The previous logic stored a watch session at that moment but only updated progress if the same endpoint was called again 5+ minutes later — which never happens. Progress was therefore never synced.
+
+#### Solution
+- `storeWatchSession()` now returns `true` when a brand-new session is created (vs refreshing an existing one)
+- When a new session is created and the 5-minute threshold has not yet elapsed, a `setTimeout` is scheduled for 5 minutes + 2 seconds
+- When the timer fires, `shouldUpdateProgress()` is re-evaluated (guards against edge cases) and if true, `updateProgress()` is called on the appropriate service (AniList or MAL)
+- The immediate synchronous check is retained so that if the stream endpoint is somehow called again after 5 minutes, it still works without the timer
+
+#### Files Changed
+- `addon.js` — deferred `setTimeout` logic in `getStream()`
+- `config/tokens.js` — `storeWatchSession()` returns `isNew` boolean
+
+---
+
+## 🎯 Improvements (2026-04-18)
 
 ### 6. OAuth Authentication System
 
