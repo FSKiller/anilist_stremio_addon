@@ -31,9 +31,9 @@ const ADDON_MANIFEST = {
   id: 'community.anilist-stremio',
   version: '1.5.0',
   name: 'AniList Sync',
-  description: 'Syncs your AniList Currently Watching anime to Stremio library with progress tracking',
-  types: ['anime'],
-  resources: ['catalog', 'meta', 'stream'],
+  description: 'Syncs your AniList Currently Watching anime to Stremio library',
+  types: ['anime', 'series', 'movie'],
+  resources: ['catalog', 'meta'],
   contactEmail: 'contact@example.com'
 };
 
@@ -45,9 +45,9 @@ const MAL_MANIFEST = {
   id: 'community.mal-stremio',
   version: '1.4.0',
   name: 'MyAnimeList Sync',
-  description: 'Syncs your MyAnimeList Currently Watching anime to Stremio library with progress tracking',
-  types: ['anime'],
-  resources: ['catalog', 'meta', 'stream'],
+  description: 'Syncs your MyAnimeList Currently Watching anime to Stremio library',
+  types: ['anime', 'series', 'movie'],
+  resources: ['catalog', 'meta'],
   contactEmail: 'contact@example.com'
 };
 

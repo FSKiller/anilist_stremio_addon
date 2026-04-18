@@ -71,8 +71,8 @@ async function getCatalog(type, id, extra, username, service, malClientId) {
   try {
     console.log(`Catalog request - Service: ${service}, Type: ${type}, ID: ${id}, Extra: ${extra || 'none'}, User: ${username}`);
 
-    if (type !== 'anime') {
-      console.warn(`Invalid type "${type}" for catalog "${id}". Expected "anime".`);
+    if (type !== 'anime' && type !== 'series' && type !== 'movie') {
+      console.warn(`Invalid type "${type}" for catalog "${id}". Expected "anime", "series", or "movie".`);
       return { metas: [] };
     }
 
@@ -131,24 +131,28 @@ async function getMeta(type, id, username, service, malClientId) {
   try {
     console.log(`Meta request - Service: ${service}, Type: ${type}, ID: ${id}`);
 
-    if (type !== 'anime') {
+    if (type !== 'anime' && type !== 'series' && type !== 'movie') {
       throw new Error(`Unsupported content type: ${type}`);
     }
 
     if (service === 'mal') {
-      if (!id.startsWith('mal:')) {
-        return { meta: null };
+      if (id.startsWith('mal:')) {
+        const meta = await malService.getAnimeMeta(id, malClientId);
+        return { meta };
       }
-      const meta = await malService.getAnimeMeta(id, malClientId);
-      return { meta };
+      if (id.startsWith('kitsu:')) {
+        const meta = await malService.getAnimeMeta(id, malClientId);
+        return { meta };
+      }
+      return { meta: null };
     }
 
     // Default: AniList
-    if (!id.startsWith('anilist:')) {
-      return { meta: null };
+    if (id.startsWith('anilist:') || id.startsWith('kitsu:')) {
+      const meta = await anilistService.getAnimeMeta(id);
+      return { meta };
     }
-    const meta = await anilistService.getAnimeMeta(id);
-    return { meta };
+    return { meta: null };
 
   } catch (error) {
     console.error(`Error in getMeta (${type}/${id}):`, error.message);

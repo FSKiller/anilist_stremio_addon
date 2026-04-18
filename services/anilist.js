@@ -161,6 +161,8 @@ async function mapKitsuToAniList(kitsuId) {
   }
 }
 
+const KITSU_API_URL = 'https://kitsu.io/api/edge';
+
 /**
  * GraphQL query to fetch user's currently watching anime
  * 
@@ -177,6 +179,7 @@ const ANIME_LIST_QUERY = `
           id
           media {
             id
+            idMal
             title {
               english
               romaji
@@ -190,9 +193,14 @@ const ANIME_LIST_QUERY = `
             genres
             averageScore
             status
+            format
             episodes
             seasonYear
             season
+            externalLinks {
+              url
+              site
+            }
           }
           status
           progress
@@ -318,6 +326,23 @@ async function getAnimeList(username, status) {
  * @param {number} entry.progress - Episodes watched
  * @returns {Object} Stremio-compatible meta object
  */
+/**
+ * Extracts a numeric Kitsu ID from AniList external links.
+ *
+ * @private
+ * @param {Array<Object>} externalLinks - AniList externalLinks array
+ * @returns {string|null} Kitsu ID string, or null if not found
+ */
+function extractKitsuId(externalLinks) {
+  if (!Array.isArray(externalLinks)) return null;
+  const kitsuLink = externalLinks.find(
+    link => link.site === 'Kitsu' && link.url
+  );
+  if (!kitsuLink) return null;
+  const match = kitsuLink.url.match(/kitsu\.(?:io|app)\/anime\/(\d+)/);
+  return match ? match[1] : null;
+}
+
 function transformToStremioMeta(entry) {
   const media = entry.media;
   
@@ -341,9 +366,18 @@ function transformToStremioMeta(entry) {
     ? media.description.replace(/<[^>]*>/g, '').trim()
     : '';
 
+  // Prefer kitsu: IDs so stream addons (Comet, MediaFusion, AIO Streams) can
+  // find streams. Fall back to anilist: if no Kitsu link is available.
+  const kitsuId = extractKitsuId(media.externalLinks);
+  const id = kitsuId ? `kitsu:${kitsuId}` : `anilist:${media.id}`;
+
+  // Use 'movie' for films, 'series' for everything else so stream addons
+  // (Comet, MediaFusion, AIO Streams) recognise the content type.
+  const type = media.format === 'MOVIE' ? 'movie' : 'series';
+
   return {
-    id: `anilist:${media.id}`,
-    type: 'anime',
+    id,
+    type,
     name: title,
     aliases,
     poster: media.coverImage.large || media.coverImage.medium,
@@ -383,15 +417,64 @@ function transformToStremioMeta(entry) {
  * const meta = await getAnimeMeta("anilist:12345");
  * // Returns: { id: "anilist:12345", type: "anime", name: "..." }
  */
+/**
+ * Fetches metadata for a Kitsu anime ID via the Kitsu REST API.
+ *
+ * @async
+ * @private
+ * @param {string} id - Anime ID in "kitsu:{id}" format
+ * @returns {Promise<Object>} Stremio meta object
+ */
+async function fetchKitsuMeta(id) {
+  const kitsuId = id.replace('kitsu:', '');
+  console.log(`Fetching Kitsu metadata for anime ID: ${kitsuId}`);
+
+  const response = await axios.get(
+    `${KITSU_API_URL}/anime/${encodeURIComponent(kitsuId)}`,
+    {
+      headers: { 'Accept': 'application/vnd.api+json' },
+      timeout: 10000
+    }
+  );
+
+  const anime = response.data?.data;
+  if (!anime) throw new Error('Invalid response from Kitsu API');
+
+  const attrs = anime.attributes;
+  const title = attrs.titles?.en || attrs.titles?.en_jp || attrs.canonicalTitle;
+  const rating = attrs.averageRating
+    ? (parseFloat(attrs.averageRating) / 10).toFixed(1)
+    : null;
+  const year = attrs.startDate ? parseInt(attrs.startDate.substring(0, 4), 10) : null;
+  const cleanDescription = attrs.synopsis
+    ? attrs.synopsis.replace(/<[^>]*>/g, '').trim()
+    : '';
+
+  return {
+    id,
+    type: 'anime',
+    name: title,
+    poster: attrs.posterImage?.large || attrs.posterImage?.medium,
+    posterShape: POSTER_SHAPES.PORTRAIT,
+    background: attrs.coverImage?.large || attrs.coverImage?.original,
+    description: cleanDescription,
+    imdbRating: rating,
+    releaseInfo: year ? `${year}` : undefined,
+    year
+  };
+}
+
 async function getAnimeMeta(id) {
   try {
-    // Extract numeric ID from "anilist:12345" format
+    if (id.startsWith('kitsu:')) {
+      return await fetchKitsuMeta(id);
+    }
+
+    // Legacy anilist: ID — fetch from AniList
     const anilistId = id.replace('anilist:', '');
-    
-    console.log(`Fetching metadata for anime ID: ${anilistId}`);
-    
-    // TODO: Implement full metadata fetch from AniList
-    // For now, return basic structure
+    console.log(`Fetching AniList metadata for anime ID: ${anilistId}`);
+
+    // TODO: Implement full metadata fetch from AniList GraphQL
     return {
       id,
       type: 'anime',
