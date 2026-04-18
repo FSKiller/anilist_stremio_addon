@@ -132,6 +132,29 @@ function hasValidTokens(service, username) {
   return getTokens(service, username) !== null;
 }
 
+// ---------------------------------------------------------------------------
+// Opaque MAL addon token store — maps a random 64-char hex token to a username
+// Persisted to tokens.json so addon URLs survive server restarts.
+// ---------------------------------------------------------------------------
+
+function storeOpaqueToken(opaqueToken, username) {
+  const tokens = loadTokens();
+  tokens[`mal_link:${opaqueToken}`] = username.toLowerCase();
+  saveTokens(tokens);
+  console.log(`Stored opaque MAL token for user: ${username}`);
+}
+
+function resolveOpaqueToken(opaqueToken) {
+  const tokens = loadTokens();
+  return tokens[`mal_link:${opaqueToken}`] || null;
+}
+
+function hasValidTokensByOpaqueToken(opaqueToken) {
+  const username = resolveOpaqueToken(opaqueToken);
+  if (!username) return false;
+  return hasValidTokens('mal', username);
+}
+
 // In-memory PKCE verifier store (ephemeral, keyed by random session ID)
 const _pkceStore = {};
 
@@ -227,5 +250,8 @@ module.exports = {
   shouldUpdateProgress,
   markProgressUpdated,
   updateWatchSessionAccess,
-  cleanupOldSessions
+  cleanupOldSessions,
+  storeOpaqueToken,
+  resolveOpaqueToken,
+  hasValidTokensByOpaqueToken
 };
