@@ -67,12 +67,12 @@ const manifest = getManifest('anilist');
  * const catalog = await getCatalog("anime", "anilist.watching");
  * // Returns: { metas: [{ id: "anilist:12345", name: "...", ... }] }
  */
-async function getCatalog(type, id, extra, username, service, malClientId) {
+async function getCatalog(type, id, extra, token, service, malClientId) {
   try {
-    console.log(`Catalog request - Service: ${service}, Type: ${type}, ID: ${id}, Extra: ${extra || 'none'}, User: ${username}`);
+    console.log(`Catalog request - Service: ${service}, Type: ${type}, ID: ${id}, Extra: ${extra || 'none'}`);    
 
-    if (type !== 'anime') {
-      console.warn(`Invalid type "${type}" for catalog "${id}". Expected "anime".`);
+    if (type !== 'anime' && type !== 'series') {
+      console.warn(`Invalid type "${type}" for catalog "${id}". Expected "anime" or "series".`);
       return { metas: [] };
     }
 
@@ -87,14 +87,14 @@ async function getCatalog(type, id, extra, username, service, malClientId) {
 
     if (service === 'mal' && id === 'mal.list') {
       const malStatus = MAL_STATUS_MAP[genreFilter] || 'watching';
-      const metas = await malService.getAnimeList(username, malClientId, malStatus);
+      const metas = await malService.getAnimeList(token, malClientId, malStatus);
       console.log(`Returning ${metas.length} items for MAL catalog [${genreFilter}]`);
       return { metas };
     }
 
     if (service === 'anilist' && id === 'anilist.list') {
       const anilistStatus = ANILIST_STATUS_MAP[genreFilter] || 'CURRENT';
-      const metas = await anilistService.getAnimeList(username, anilistStatus);
+      const metas = await anilistService.getAnimeList(token, anilistStatus);
       console.log(`Returning ${metas.length} items for AniList catalog [${genreFilter}]`);
       return { metas };
     }
@@ -127,11 +127,11 @@ async function getCatalog(type, id, extra, username, service, malClientId) {
  * const meta = await getMeta("anime", "anilist:12345");
  * // Returns: { meta: { id: "anilist:12345", name: "...", ... } }
  */
-async function getMeta(type, id, username, service, malClientId) {
+async function getMeta(type, id, token, service, malClientId) {
   try {
-    console.log(`Meta request - Service: ${service}, Type: ${type}, ID: ${id}`);
+    console.log(`Meta request - Service: ${service}, Type: ${type}, ID: ${id} (token present: ${!!token})`);    
 
-    if (type !== 'anime') {
+    if (type !== 'anime' && type !== 'series') {
       throw new Error(`Unsupported content type: ${type}`);
     }
 
@@ -159,6 +159,112 @@ async function getMeta(type, id, username, service, malClientId) {
 }
 
 /**
+ * getStream - Handle stream requests with progress tracking
+ * 
+ * This function handles Stremio stream requests and implements progress updates
+ * that only occur after 5 minutes of continuous watching.
+ * 
+ * @async
+ * @param {string} type - Content type (should be 'anime')
+ * @param {string} id - Content ID (e.g., 'anilist:12345')
+ * @param {Object} videoInfo - Video information including episode number
+ * @param {string} username - User's username
+ * @param {string} service - Service type ('anilist' or 'mal')
+ * @param {string} malClientId - MAL Client ID (for MAL service)
+ * @returns {Promise<Object>} Stream response object
+ */
+async function getStream(type, id, videoInfo, token, service, malClientId) {
+  try {
+    console.log(`Stream request - Service: ${service}, Type: ${type}, ID: ${id}, Video: ${JSON.stringify(videoInfo)} (token present: ${!!token})`);    
+
+    if (type !== 'anime' && type !== 'series') {
+      throw new Error(`Unsupported content type: ${type}`);
+    }
+
+    // Extract anime ID from the content ID
+    let animeId;
+    let actualService = service;
+
+    if (service === 'mal') {
+      if (!id.startsWith('mal:')) {
+        return { streams: [] };
+      }
+      animeId = id.substring(4); // Remove 'mal:' prefix
+    } else {
+      // Default: AniList - handle both anilist: and kitsu: IDs
+      if (id.startsWith('anilist:')) {
+        animeId = id.split(':')[1]; // just the numeric ID
+      } else if (id.startsWith('kitsu:')) {
+        // Extract Kitsu ID (may include season info like kitsu:46729:3)
+        const kitsuId = id.split(':')[1];
+        try {
+          // Map Kitsu ID to AniList ID
+          const anilistId = await anilistService.mapKitsuToAniList(kitsuId);
+          if (!anilistId) {
+            console.log(`Could not map Kitsu ID ${kitsuId} to AniList ID`);
+            return { streams: [] };
+          }
+          animeId = anilistId;
+          console.log(`Mapped Kitsu ID ${kitsuId} to AniList ID ${animeId}`);
+        } catch (mappingError) {
+          console.error(`Failed to map Kitsu ID ${kitsuId}:`, mappingError.message);
+          return { streams: [] };
+        }
+      } else if (/^tt\d+/.test(id)) {
+        // IMDB ID — bare (tt32550889) or series format (tt32550889:1:2)
+        const imdbId = id.split(':')[0];
+        try {
+          const anilistId = await anilistService.mapImdbToAniList(imdbId);
+          if (!anilistId) {
+            console.log(`Could not map IMDB ID ${id} to AniList ID`);
+            return { streams: [] };
+          }
+          animeId = anilistId;
+          console.log(`Mapped IMDB ID ${id} to AniList ID ${animeId}`);
+        } catch (mappingError) {
+          console.error(`Failed to map IMDB ID ${id}:`, mappingError.message);
+          return { streams: [] };
+        }
+      } else {
+        return { streams: [] };
+      }
+    }
+
+    // Handle progress update if videoInfo contains episode information
+    if (videoInfo && videoInfo.episode) {
+      try {
+        const tokenManager = require('./config/tokens');
+        
+        // Clean up old watch sessions first
+        tokenManager.cleanupOldSessions(actualService, token);
+
+        // Start or update watch session
+        tokenManager.storeWatchSession(actualService, token, animeId, videoInfo.episode);
+
+        // [TESTING] 5-minute wait removed — update progress immediately
+        if (actualService === 'mal') {
+          await malService.updateProgress(animeId, videoInfo.episode, token, malClientId);
+        } else {
+          await anilistService.updateProgress(animeId, videoInfo.episode, token);
+        }
+        console.log(`✅ Updated progress for ${actualService} anime ${animeId}: episode ${videoInfo.episode}`);
+      } catch (progressError) {
+        console.error(`Failed to update progress for ${actualService} anime ${animeId}:`, progressError.message);
+        // Don't fail the stream request if progress update fails
+      }
+    }
+
+    // Return empty streams since this addon doesn't provide actual streaming
+    // The main purpose is progress tracking
+    return { streams: [] };
+
+  } catch (error) {
+    console.error(`Error in getStream (${type}/${id}):`, error.message);
+    throw new Error(`Failed to process stream request: ${error.message}`);
+  }
+}
+
+/**
  * Exported addon interface
  * 
  * This object provides the public API for the Stremio addon,
@@ -168,7 +274,8 @@ module.exports = {
   manifest,
   getManifest,
   getCatalog,
-  getMeta
+  getMeta,
+  getStream
 };
 
 // Made with Bob

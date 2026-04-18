@@ -66,7 +66,31 @@ const config = {
    * Whether the app is running in development mode
    * @type {boolean}
    */
-  isDevelopment: getEnvVar('NODE_ENV', 'development') === 'development'
+  isDevelopment: getEnvVar('NODE_ENV', 'development') === 'development',
+
+  /**
+   * AniList OAuth Client ID (for progress updates)
+   * @type {string|null}
+   */
+  anilistClientId: getEnvVar('ANILIST_CLIENT_ID', null),
+
+  /**
+   * AniList OAuth Client Secret (for progress updates)
+   * @type {string|null}
+   */
+  anilistClientSecret: getEnvVar('ANILIST_CLIENT_SECRET', null),
+
+  /**
+   * MAL OAuth Client ID (for progress updates)
+   * @type {string|null}
+   */
+  malOauthClientId: getEnvVar('MAL_OAUTH_CLIENT_ID', null),
+
+  /**
+   * MAL OAuth Client Secret (for progress updates)
+   * @type {string|null}
+   */
+  malOauthClientSecret: getEnvVar('MAL_OAUTH_CLIENT_SECRET', null)
 };
 
 /**
@@ -85,6 +109,8 @@ function validateConfig() {
   console.log(`  - Port: ${config.port}`);
   console.log(`  - Environment: ${config.nodeEnv}`);
   console.log(`  - MAL Client ID: ${config.malClientId ? 'set' : 'not set (MAL service disabled)'}`);
+  console.log(`  - AniList OAuth: ${config.anilistClientId ? 'configured' : 'not configured (no ANILIST_CLIENT_ID)'}`);
+  console.log(`  - MAL OAuth: ${config.malOauthClientId ? 'configured' : 'not configured (progress updates disabled)'}`);
 }
 
 // Validate configuration on module load
