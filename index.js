@@ -54,41 +54,54 @@ function configurePageHandler(req, res) {
   <title>Anime Stremio Addon</title>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f0f;color:#e0e0e0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem}
-    .card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:2.5rem;max-width:500px;width:100%}
-    h1{font-size:1.5rem;margin-bottom:.4rem;color:#fff}
-    .subtitle{color:#888;font-size:.9rem;margin-bottom:1.8rem}
-    .tabs{display:flex;gap:.5rem;margin-bottom:1.8rem}
-    .tab{flex:1;padding:.55rem 0;text-align:center;border-radius:8px;cursor:pointer;font-size:.88rem;font-weight:500;border:1px solid #2a2a2a;background:#111;color:#888;transition:all .15s;user-select:none}
-    .tab.active{background:#5b6af5;color:#fff;border-color:#5b6af5}
-    .tab.disabled{opacity:.4;cursor:not-allowed}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#080810;color:#e0e0e0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem}
+    body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(91,106,245,.18) 0%,transparent 70%);pointer-events:none}
+    .card{background:rgba(18,18,28,.95);border:1px solid rgba(91,106,245,.25);border-radius:16px;padding:2.5rem;max-width:480px;width:100%;box-shadow:0 0 40px rgba(91,106,245,.08),0 8px 32px rgba(0,0,0,.5)}
+    .logo{display:flex;align-items:center;gap:.75rem;margin-bottom:.35rem}
+    .logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#5b6af5,#a855f7);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+    h1{font-size:1.45rem;font-weight:700;color:#fff;letter-spacing:-.02em}
+    .subtitle{color:#666;font-size:.88rem;margin-bottom:2rem;padding-left:48px}
+    .tabs{display:flex;gap:.4rem;margin-bottom:2rem;background:#0d0d1a;border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:.3rem}
+    .tab{flex:1;padding:.5rem 0;text-align:center;border-radius:7px;cursor:pointer;font-size:.85rem;font-weight:500;color:#555;transition:all .2s;user-select:none;border:none;background:none}
+    .tab.active{background:linear-gradient(135deg,#5b6af5,#7c3aed);color:#fff;box-shadow:0 2px 12px rgba(91,106,245,.4)}
+    .tab.disabled{opacity:.3;cursor:not-allowed}
     .panel{display:none}
     .panel.active{display:block}
-    .warn{background:#2a1f00;border:1px solid #554400;border-radius:8px;padding:.75rem 1rem;font-size:.82rem;color:#ffcc55;margin-bottom:1.2rem;line-height:1.5}
+    .warn{background:rgba(42,31,0,.8);border:1px solid rgba(85,68,.6);border-radius:10px;padding:.75rem 1rem;font-size:.82rem;color:#ffcc55;margin-bottom:1.2rem;line-height:1.5}
     .warn a{color:#ffd97a}
-    .err-box{background:#2a1010;border:1px solid #552222;border-radius:8px;padding:.75rem 1rem;font-size:.82rem;color:#ff8888;margin-bottom:1rem}
-    label{display:block;font-size:.85rem;color:#aaa;margin-bottom:.4rem}
-    input{width:100%;padding:.65rem .9rem;background:#111;border:1px solid #333;border-radius:8px;color:#fff;font-size:1rem;outline:none;transition:border-color .15s}
-    input:focus{border-color:#5b6af5}
-    input.invalid{border-color:#e05555}
-    .hint{font-size:.78rem;color:#666;margin-top:.35rem;min-height:1.2em}
+    .err-box{background:rgba(42,16,16,.8);border:1px solid rgba(85,34,34,.8);border-radius:10px;padding:.75rem 1rem;font-size:.82rem;color:#ff8888;margin-bottom:1rem}
+    .url-box{display:none}
+    .actions{display:flex;gap:.6rem;flex-wrap:wrap}
+    .btn{padding:.6rem 1.25rem;border-radius:8px;font-size:.88rem;font-weight:600;cursor:pointer;border:none;text-decoration:none;display:inline-flex;align-items:center;gap:.4rem;transition:all .2s;letter-spacing:.01em}
+    .btn:active{transform:scale(.97)}
+    .btn-login{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;width:100%;justify-content:center;padding:.75rem;font-size:.95rem;border-radius:10px;box-shadow:0 4px 16px rgba(37,99,235,.3)}
+    .btn-login:hover{box-shadow:0 4px 20px rgba(37,99,235,.5);opacity:1;filter:brightness(1.1)}
+    .btn-copy{background:rgba(255,255,255,.06);color:#ccc;border:1px solid rgba(255,255,255,.1)}
+    .btn-copy:hover{background:rgba(255,255,255,.1);color:#fff}
+    .btn-stremio{background:linear-gradient(135deg,#5b6af5,#7c3aed);color:#fff;box-shadow:0 4px 14px rgba(91,106,245,.3)}
+    .btn-stremio:hover{box-shadow:0 4px 18px rgba(91,106,245,.5);opacity:1;filter:brightness(1.1)}
+    .btn-switch{background:none;color:#444;font-size:.78rem;font-weight:400;padding:.3rem 0;margin-top:.9rem;text-decoration:underline;text-underline-offset:3px;cursor:pointer;border:none}
+    .btn-switch:hover{color:#888}
+    .hint{font-size:.78rem;color:#555;margin-top:.35rem;min-height:1.2em}
     .hint.err{color:#e05555}
-    .url-box{background:#111;border:1px solid #2a2a2a;border-radius:8px;padding:.7rem .9rem;font-family:monospace;font-size:.8rem;color:#a0c4ff;word-break:break-all;margin-bottom:.9rem}
-    .actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.9rem}
-    .btn{padding:.55rem 1.1rem;border-radius:7px;font-size:.88rem;font-weight:500;cursor:pointer;border:none;text-decoration:none;display:inline-block;transition:opacity .15s}
-    .btn:hover{opacity:.85}
-    .btn-grey{background:#2a2a2a;color:#e0e0e0}
-    .btn-blue{background:#02a9ff;color:#fff;font-size:.95rem;font-weight:600}
-    .btn-indigo{background:#5b6af5;color:#fff}
-    .copied{color:#4caf7d;font-size:.82rem;margin-top:.4rem;min-height:1.1em}
+    label{display:block;font-size:.82rem;color:#888;margin-bottom:.4rem;font-weight:500;letter-spacing:.02em;text-transform:uppercase;font-size:.72rem}
+    input{width:100%;padding:.65rem .9rem;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:#fff;font-size:1rem;outline:none;transition:border-color .2s,box-shadow .2s}
+    input:focus{border-color:#5b6af5;box-shadow:0 0 0 3px rgba(91,106,245,.15)}
+    input.invalid{border-color:#e05555}
     .result{margin-top:1.5rem}
-    .note{font-size:.78rem;color:#555;margin-top:1.5rem;line-height:1.5}
+    .copied{color:#4ade80;font-size:.8rem;margin-top:.5rem;min-height:1.1em}
+    .divider{height:1px;background:rgba(255,255,255,.06);margin:1.5rem 0}
+    .note{font-size:.75rem;color:#3a3a4a;margin-top:1.5rem;line-height:1.6;text-align:center}
+    .pre-hint{font-size:.78rem;color:#444;margin-top:.75rem;text-align:center;line-height:1.5}
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Anime Stremio Addon</h1>
-    <p class="subtitle">Sync your anime list to Stremio &mdash; all statuses included.</p>
+    <div class="logo">
+      <div class="logo-icon">&#x1F3AC;</div>
+      <h1>Anime Stremio Addon</h1>
+    </div>
+    <p class="subtitle">Sync your anime list to Stremio &mdash; all statuses.</p>
 
     <div class="tabs">
       <div class="tab active" id="tab-anilist" onclick="switchTab('anilist')">AniList</div>
@@ -97,42 +110,40 @@ function configurePageHandler(req, res) {
 
     <!-- AniList panel -->
     <div class="panel active" id="panel-anilist">
-      ${!anilistOk ? '<div class="err-box"><strong>ANILIST_CLIENT_ID not set.</strong> Add it to .env and restart the server.</div>' : ''}
+      ${!anilistOk ? '<div class="err-box"><strong>ANILIST_CLIENT_ID not set.</strong> Add it to .env and restart.</div>' : ''}
       <div id="al-pre"${!anilistOk ? ' style="display:none"' : ''}>
-        <button class="btn btn-blue" onclick="alLogin()">Login with AniList</button>
-        <p style="font-size:.78rem;color:#555;margin-top:.8rem">You will be redirected to AniList, then returned here with your install URL.</p>
+        <button class="btn btn-login" onclick="alLogin()">&#x1F511;&nbsp; Login with AniList</button>
+        <p class="pre-hint">You will be redirected to AniList to authorize,<br>then returned here automatically.</p>
       </div>
       <div id="al-post" style="display:none" class="result">
-        <label>Your AniList install URL</label>
         <div class="url-box" id="al-url"></div>
         <div class="actions">
-          <button class="btn btn-grey" onclick="alCopy()">Copy URL</button>
-          <a class="btn btn-indigo" id="al-stremio" href="#">Open in Stremio</a>
+          <button class="btn btn-copy" onclick="alCopy()">&#x1F4CB;&nbsp; Copy URL</button>
+          <a class="btn btn-stremio" id="al-stremio" href="#">&#x25B6;&nbsp; Open in Stremio</a>
         </div>
         <p class="copied" id="al-copied"></p>
-        <button class="btn btn-grey" style="margin-top:.8rem;font-size:.8rem" onclick="alLogin()">Login with a different account</button>
+        <button class="btn-switch" onclick="alReset()">Switch account</button>
       </div>
     </div>
 
     <!-- MAL panel -->
     <div class="panel" id="panel-mal">
-      ${!malOk ? '<div class="warn">MAL support requires <strong>MAL_CLIENT_ID</strong> in .env.<br>Register an app at <a href="https://myanimelist.net/apiconfig" target="_blank" rel="noopener">myanimelist.net/apiconfig</a>.</div>' : ''}
-      <label for="mal-username">Your MyAnimeList username</label>
+      ${!malOk ? '<div class="warn">MAL support requires <strong>MAL_CLIENT_ID</strong> in .env.<br>Register at <a href="https://myanimelist.net/apiconfig" target="_blank" rel="noopener">myanimelist.net/apiconfig</a>.</div>' : ''}
+      <label for="mal-username">MyAnimeList username</label>
       <input type="text" id="mal-username" placeholder="e.g. Mitsukuri"
              autocomplete="off" spellcheck="false" maxlength="20"${!malOk ? ' disabled' : ''}>
       <p class="hint" id="mal-hint">Letters, numbers, hyphens and underscores (2&ndash;20 chars).</p>
       <div id="mal-result" style="display:none" class="result">
-        <label>Your MAL install URL</label>
         <div class="url-box" id="mal-url"></div>
         <div class="actions">
-          <button class="btn btn-grey" onclick="malCopy()">Copy URL</button>
-          <a class="btn btn-indigo" id="mal-stremio" href="#">Open in Stremio</a>
+          <button class="btn btn-copy" onclick="malCopy()">&#x1F4CB;&nbsp; Copy URL</button>
+          <a class="btn btn-stremio" id="mal-stremio" href="#">&#x25B6;&nbsp; Open in Stremio</a>
         </div>
         <p class="copied" id="mal-copied"></p>
       </div>
     </div>
 
-    <p class="note">Includes: Currently Watching &bull; On Hold &bull; Plan to Watch &bull; Dropped &bull; Completed &bull; Rewatching</p>
+    <p class="note">Currently Watching &bull; On Hold &bull; Plan to Watch &bull; Dropped &bull; Completed &bull; Rewatching</p>
   </div>
 
   <script>
@@ -159,6 +170,14 @@ function configurePageHandler(req, res) {
     })();
 
     function alLogin() { window.location.href = BASE + '/auth/anilist'; }
+
+    function alReset() {
+      document.getElementById('al-post').style.display = 'none';
+      document.getElementById('al-url').textContent = '';
+      document.getElementById('al-stremio').href = '#';
+      document.getElementById('al-copied').textContent = '';
+      document.getElementById('al-pre').style.display = 'block';
+    }
 
     function showAlResult(token) {
       var url = BASE + '/anilist/' + encodeURIComponent(token) + '/manifest.json';
