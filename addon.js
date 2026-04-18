@@ -12,6 +12,25 @@ const anilistService = require('./services/anilist');
 const malService = require('./services/mal');
 const { ADDON_MANIFEST, MAL_MANIFEST, ANILIST_CATALOGS, MAL_CATALOGS } = require('./config/constants');
 
+// Maps the genre filter label to each service's status value
+const ANILIST_STATUS_MAP = {
+  'Currently Watching': 'CURRENT',
+  'On Hold':            'PAUSED',
+  'Plan to Watch':      'PLANNING',
+  'Dropped':            'DROPPED',
+  'Completed':          'COMPLETED',
+  'Rewatching':         'REPEATING'
+};
+
+const MAL_STATUS_MAP = {
+  'Currently Watching': 'watching',
+  'On Hold':            'on_hold',
+  'Plan to Watch':      'plan_to_watch',
+  'Dropped':            'dropped',
+  'Completed':          'completed',
+  'Rewatching':         'rewatching'
+};
+
 /**
  * Returns the Stremio manifest for a given service.
  *
@@ -50,41 +69,41 @@ const manifest = getManifest('anilist');
  */
 async function getCatalog(type, id, extra, username, service, malClientId) {
   try {
-    console.log(`Catalog request - Service: ${service}, Type: ${type}, ID: ${id}, User: ${username}`);
+    console.log(`Catalog request - Service: ${service}, Type: ${type}, ID: ${id}, Extra: ${extra || 'none'}, User: ${username}`);
 
-    if (service === 'mal' && id === 'mal.watching') {
-      if (type !== 'anime') {
-        console.warn(`Invalid type "${type}" for catalog "${id}". Expected "anime".`);
-        return { metas: [] };
+    if (type !== 'anime') {
+      console.warn(`Invalid type "${type}" for catalog "${id}". Expected "anime".`);
+      return { metas: [] };
+    }
+
+    // Parse genre filter from extra string, e.g. "genre=On%20Hold"
+    let genreFilter = 'Currently Watching';
+    if (extra) {
+      const match = extra.match(/genre=([^&]+)/);
+      if (match) {
+        genreFilter = decodeURIComponent(match[1]);
       }
-      const metas = await malService.getCurrentlyWatchingAnime(username, malClientId);
-      console.log(`Returning ${metas.length} items for MAL catalog "${id}"`);
+    }
+
+    if (service === 'mal' && id === 'mal.list') {
+      const malStatus = MAL_STATUS_MAP[genreFilter] || 'watching';
+      const metas = await malService.getAnimeList(username, malClientId, malStatus);
+      console.log(`Returning ${metas.length} items for MAL catalog [${genreFilter}]`);
       return { metas };
     }
 
-    if (service === 'anilist' && id === 'anilist.watching') {
-      // Validate content type
-      if (type !== 'anime') {
-        console.warn(`Invalid type "${type}" for catalog "${id}". Expected "anime".`);
-        return { metas: [] };
-      }
-
-      // Fetch currently watching anime from AniList
-      const metas = await anilistService.getCurrentlyWatchingAnime(username);
-      
-      console.log(`Returning ${metas.length} items for catalog "${id}"`);
+    if (service === 'anilist' && id === 'anilist.list') {
+      const anilistStatus = ANILIST_STATUS_MAP[genreFilter] || 'CURRENT';
+      const metas = await anilistService.getAnimeList(username, anilistStatus);
+      console.log(`Returning ${metas.length} items for AniList catalog [${genreFilter}]`);
       return { metas };
     }
 
-    // Unknown catalog ID
     console.warn(`Unknown catalog ID: ${id}`);
     return { metas: [] };
 
   } catch (error) {
-    // Log error but don't crash - return empty catalog instead
     console.error(`Error in getCatalog (${type}/${id}):`, error.message);
-    
-    // Re-throw error to be handled by the HTTP layer
     throw new Error(`Failed to fetch catalog: ${error.message}`);
   }
 }
@@ -118,7 +137,7 @@ async function getMeta(type, id, username, service, malClientId) {
 
     if (service === 'mal') {
       if (!id.startsWith('mal:')) {
-        throw new Error(`Invalid ID format: ${id}. Expected format: "mal:{number}"`);
+        return { meta: null };
       }
       const meta = await malService.getAnimeMeta(id, malClientId);
       return { meta };
@@ -126,7 +145,7 @@ async function getMeta(type, id, username, service, malClientId) {
 
     // Default: AniList
     if (!id.startsWith('anilist:')) {
-      throw new Error(`Invalid ID format: ${id}. Expected format: "anilist:{number}"`);
+      return { meta: null };
     }
     const meta = await anilistService.getAnimeMeta(id);
     return { meta };

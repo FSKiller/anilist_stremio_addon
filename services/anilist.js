@@ -18,9 +18,9 @@ const { ANILIST_API_URL, ANILIST_STATUS, POSTER_SHAPES } = require('../config/co
  * 
  * @constant {string}
  */
-const CURRENTLY_WATCHING_QUERY = `
-  query ($userName: String) {
-    MediaListCollection(userName: $userName, type: ANIME, status: CURRENT) {
+const ANIME_LIST_QUERY = `
+  query ($userName: String, $status: MediaListStatus) {
+    MediaListCollection(userName: $userName, type: ANIME, status: $status) {
       lists {
         entries {
           id
@@ -77,16 +77,15 @@ const CURRENTLY_WATCHING_QUERY = `
  * const animeList = await getCurrentlyWatchingAnime();
  * // Returns: [{ id: "anilist:12345", name: "Attack on Titan", ... }]
  */
-async function getCurrentlyWatchingAnime(username) {
+async function getAnimeList(username, status) {
   try {
-    console.log(`Fetching currently watching anime for user: ${username}`);
+    console.log(`Fetching ${status} anime for user: ${username}`);
     
-    // Make GraphQL request to AniList API
     const response = await axios.post(
       ANILIST_API_URL,
       {
-        query: CURRENTLY_WATCHING_QUERY,
-        variables: { userName: username }
+        query: ANIME_LIST_QUERY,
+        variables: { userName: username, status }
       },
       {
         headers: {
@@ -107,12 +106,12 @@ async function getCurrentlyWatchingAnime(username) {
     
     // Handle case where user has no currently watching anime
     if (!mediaListCollection || !mediaListCollection.lists || mediaListCollection.lists.length === 0) {
-      console.log('No currently watching anime found for user');
+      console.log(`No ${status} anime found for user`);
       return [];
     }
 
     const entries = mediaListCollection.lists[0]?.entries || [];
-    console.log(`Found ${entries.length} currently watching anime`);
+    console.log(`Found ${entries.length} ${status} anime`);
 
     // Transform AniList entries to Stremio meta format
     return entries.map(entry => transformToStremioMeta(entry));
@@ -255,7 +254,7 @@ async function getAnimeMeta(id) {
 }
 
 module.exports = {
-  getCurrentlyWatchingAnime,
+  getAnimeList,
   getAnimeMeta
 };
 

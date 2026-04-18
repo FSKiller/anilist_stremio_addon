@@ -56,15 +56,15 @@ const META_FIELDS = [
  * @returns {Promise<Array<Object>>} Array of Stremio meta objects
  * @throws {Error} If the MAL API request fails
  */
-async function getCurrentlyWatchingAnime(username, clientId) {
+async function getAnimeList(username, clientId, status) {
   try {
-    console.log(`Fetching currently watching anime from MAL for user: ${username}`);
+    console.log(`Fetching ${status} anime from MAL for user: ${username}`);
 
     const response = await axios.get(
       `${MAL_API_URL}/users/${encodeURIComponent(username)}/animelist`,
       {
         params: {
-          status: 'watching',
+          status,
           fields: LIST_FIELDS,
           limit: 1000,
           nsfw: true
@@ -81,7 +81,7 @@ async function getCurrentlyWatchingAnime(username, clientId) {
       throw new Error('Invalid response structure from MAL API');
     }
 
-    console.log(`Found ${data.length} currently watching anime on MAL`);
+    console.log(`Found ${data.length} ${status} anime on MAL`);
     return data.map(entry => transformToStremioMeta(entry));
 
   } catch (error) {
@@ -229,6 +229,6 @@ function buildMeta(anime, progressEpisodes) {
 }
 
 module.exports = {
-  getCurrentlyWatchingAnime,
+  getAnimeList,
   getAnimeMeta
 };

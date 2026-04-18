@@ -55,23 +55,43 @@ const MAL_MANIFEST = {
  * Catalog configuration for the AniList addon
  * @constant {Array<Object>}
  */
+// Status options for each service's top filter button
+const ANILIST_STATUS_OPTIONS = [
+  'Currently Watching',
+  'On Hold',
+  'Plan to Watch',
+  'Dropped',
+  'Completed',
+  'Rewatching'
+];
+
+const MAL_STATUS_OPTIONS = [
+  'Currently Watching',
+  'On Hold',
+  'Plan to Watch',
+  'Dropped',
+  'Completed'
+];
+
 const ANILIST_CATALOGS = [
   {
     type: 'anime',
-    id: 'anilist.watching',
-    name: 'AniList - Currently Watching'
+    id: 'anilist.list',
+    name: 'AniList',
+    extra: [
+      { name: 'genre', options: ANILIST_STATUS_OPTIONS, isRequired: true }
+    ]
   }
 ];
 
-/**
- * Catalog configuration for the MAL addon
- * @constant {Array<Object>}
- */
 const MAL_CATALOGS = [
   {
     type: 'anime',
-    id: 'mal.watching',
-    name: 'MAL - Currently Watching'
+    id: 'mal.list',
+    name: 'MyAnimeList',
+    extra: [
+      { name: 'genre', options: MAL_STATUS_OPTIONS, isRequired: true }
+    ]
   }
 ];
 
