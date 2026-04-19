@@ -24,6 +24,114 @@ const viewerCache = new Map();
 // Cache kitsu ID → AniList ID, populated from catalog fetches
 const kitsuAnilistCache = new Map();
 
+// Cache AniList ID → root { anilistId, kitsuId } to avoid redundant traversal API calls
+const rootMediaCache = new Map();
+
+// Cache Cinemeta metadata keyed by "type:ttId" to avoid redundant fetches
+const cinemetaCache = new Map();
+
+// Fribb anime-lists: maps AniList IDs to IMDB/Kitsu IDs.
+// Loaded once lazily from GitHub on first catalog request.
+let fribbMap = null; // Map<anilistId, { imdb_id, kitsu_id }>
+let fribbImdbReverseMap = null; // Map<imdb_id, anilistId>
+let fribbKitsuToImdbMap = null; // Map<kitsu_id, imdb_id>
+let fribbLoadPromise = null;
+
+async function loadFribbMap() {
+  if (fribbMap) return fribbMap;
+  if (fribbLoadPromise) return fribbLoadPromise;
+  fribbLoadPromise = (async () => {
+    try {
+      console.log('Loading Fribb anime-lists mapping...');
+      const resp = await axios.get(
+        'https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json',
+        { timeout: 15000 }
+      );
+      fribbMap = new Map();
+      fribbImdbReverseMap = new Map();
+      fribbKitsuToImdbMap = new Map();
+      for (const entry of resp.data) {
+        if (entry.anilist_id) {
+          const kitsuId = entry.kitsu_id ? String(entry.kitsu_id) : null;
+          fribbMap.set(entry.anilist_id, {
+            imdb_id: entry.imdb_id || null,
+            kitsu_id: kitsuId
+          });
+          if (entry.imdb_id) {
+            // Keep the lowest AniList ID for each IMDB ID — lowest = oldest = root season
+            const existing = fribbImdbReverseMap.get(entry.imdb_id);
+            if (!existing || entry.anilist_id < parseInt(existing, 10)) {
+              fribbImdbReverseMap.set(entry.imdb_id, String(entry.anilist_id));
+            }
+          }
+          if (kitsuId && entry.imdb_id) {
+            fribbKitsuToImdbMap.set(kitsuId, entry.imdb_id);
+          }
+        }
+      }
+      console.log(`Fribb anime-lists loaded: ${fribbMap.size} AniList entries`);
+      return fribbMap;
+    } catch (err) {
+      console.error('Failed to load Fribb anime-lists:', err.message);
+      fribbMap = new Map();
+      fribbImdbReverseMap = new Map();
+      fribbKitsuToImdbMap = new Map();
+      return fribbMap;
+    }
+  })();
+  return fribbLoadPromise;
+}
+
+/**
+ * Returns the IMDB ID for a given Kitsu ID using the Fribb map.
+ * Returns null if the map isn't loaded yet or no mapping exists.
+ *
+ * @param {string} kitsuId
+ * @returns {string|null}
+ */
+function getImdbForKitsuId(kitsuId) {
+  if (!fribbKitsuToImdbMap) return null;
+  return fribbKitsuToImdbMap.get(String(kitsuId)) || null;
+}
+
+function fribbLookup(anilistId) {
+  if (!fribbMap) return null;
+  return fribbMap.get(anilistId) || null;
+}
+
+/**
+ * Fetches root-level metadata from Cinemeta for an IMDB title.
+ * Returns { name, poster, background, description, genres, imdbRating, releaseInfo, year }
+ * or null on failure. Responses are cached permanently (scores/titles rarely change).
+ */
+async function fetchCinemetaMeta(imdbId, type) {
+  const cacheKey = `${type}:${imdbId}`;
+  if (cinemetaCache.has(cacheKey)) return cinemetaCache.get(cacheKey);
+  try {
+    const url = `https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`;
+    const resp = await axios.get(url, { timeout: 5000 });
+    const m = resp.data?.meta;
+    if (m) {
+      const result = {
+        name: m.name,
+        poster: m.poster,
+        background: m.background,
+        description: m.description,
+        genres: m.genres,
+        imdbRating: m.imdbRating,
+        releaseInfo: m.releaseInfo,
+        year: m.year
+      };
+      cinemetaCache.set(cacheKey, result);
+      return result;
+    }
+  } catch (err) {
+    console.log(`Cinemeta fetch failed for ${imdbId}: ${err.message}`);
+  }
+  cinemetaCache.set(cacheKey, null);
+  return null;
+}
+
 const VIEWER_QUERY = `{ Viewer { id name } }`;
 
 const UPDATE_PROGRESS_MUTATION = `
@@ -114,6 +222,29 @@ const ANIME_LIST_QUERY = `
               url
               site
             }
+            relations {
+              edges {
+                relationType
+                node {
+                  id
+                  type
+                  externalLinks {
+                    url
+                    site
+                  }
+                  relations {
+                    edges {
+                      relationType
+                      node {
+                        id
+                        type
+                        externalLinks { url site }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
           status
           progress
@@ -185,10 +316,105 @@ async function getAnimeList(token, status) {
     }
 
     const entries = mediaListCollection.lists[0]?.entries || [];
-    console.log(`Found ${entries.length} ${status} anime`);
+    console.log(`Found ${entries.length} ${status} anime on AniList`);
+
+    // Deduplicate: if both a root season and its sequel(s) are in the list,
+    // only keep the root so Stremio shows one multi-season entry per franchise.
+    const allIds = new Set(entries.map(e => e.media.id));
+    const sequelIds = new Set();
+    for (const entry of entries) {
+      for (const edge of entry.media.relations?.edges || []) {
+        if (edge.relationType === 'SEQUEL' && edge.node?.type === 'ANIME' && allIds.has(edge.node.id)) {
+          sequelIds.add(edge.node.id);
+        }
+      }
+    }
+    // Also check PREQUEL direction: if an entry's ancestor (up to 2 levels)
+    // is already in the list, remove this entry (the ancestor/root wins).
+    for (const entry of entries) {
+      if (sequelIds.has(entry.media.id)) continue;
+      for (const edge of entry.media.relations?.edges || []) {
+        if (edge.relationType === 'PREQUEL' && edge.node?.type === 'ANIME') {
+          if (allIds.has(edge.node.id)) {
+            sequelIds.add(entry.media.id);
+            break;
+          }
+          // Check grandparent (2 levels up)
+          for (const edge2 of edge.node.relations?.edges || []) {
+            if (edge2.relationType === 'PREQUEL' && edge2.node?.type === 'ANIME' && allIds.has(edge2.node.id)) {
+              sequelIds.add(entry.media.id);
+              break;
+            }
+          }
+          if (sequelIds.has(entry.media.id)) break;
+        }
+      }
+    }
+    const rootEntries = entries.filter(e => !sequelIds.has(e.media.id));
+    if (sequelIds.size > 0) {
+      console.log(`Deduped ${sequelIds.size} sequel entries — showing ${rootEntries.length} root entries`);
+    }
+
+    // Load the Fribb anime-lists mapping (cached after first load)
+    await loadFribbMap();
+
+    // For each root entry, resolve the franchise-level IMDB and Kitsu IDs.
+    // Priority for IMDB: Fribb DB (most reliable) > inline prequel traversal > own external links.
+    // Priority for Kitsu: inline prequel traversal > own external links > Fribb DB.
+    const finalEntries = [];
+    for (const entry of rootEntries) {
+      // Fribb lookup — directly maps this AniList ID to the root IMDB ID
+      const fribb = fribbLookup(entry.media.id);
+      const fribbImdbId = fribb?.imdb_id || null;
+      const fribbKitsuId = fribb?.kitsu_id || null;
+
+      // Inline prequel traversal (uses embedded relation data, no extra API calls)
+      const inlineKitsuId = findRootKitsuIdInline(entry.media);
+      const inlineImdbId = findRootImdbIdInline(entry.media) || extractImdbId(entry.media.externalLinks);
+
+      const rootImdbId = fribbImdbId || inlineImdbId;
+      const rootKitsuId = inlineKitsuId || extractKitsuId(entry.media.externalLinks) || fribbKitsuId;
+
+      if (!rootKitsuId && !rootImdbId) {
+        finalEntries.push(entry);
+        continue;
+      }
+      if (rootImdbId) console.log(`AniList:${entry.media.id} → IMDB:${rootImdbId} (${fribbImdbId ? 'fribb' : 'inline'})`);
+      if (rootKitsuId) console.log(`AniList:${entry.media.id} → kitsu:${rootKitsuId}`);
+      finalEntries.push({
+        ...entry,
+        ...(rootKitsuId ? { _rootKitsuId: rootKitsuId } : {}),
+        ...(rootImdbId ? { _rootImdbId: rootImdbId } : {})
+      });
+    }
+
+    // Deduplicate entries that resolved to the same IMDB ID (keeps first occurrence)
+    const seenImdb = new Set();
+    const imdbDeduped = [];
+    for (const entry of finalEntries) {
+      if (entry._rootImdbId) {
+        if (seenImdb.has(entry._rootImdbId)) {
+          console.log(`Dedup: dropping AniList:${entry.media.id} — duplicate IMDB:${entry._rootImdbId}`);
+          continue;
+        }
+        seenImdb.add(entry._rootImdbId);
+      }
+      imdbDeduped.push(entry);
+    }
+
+    // Enrich entries with Cinemeta metadata so catalog cards show
+    // root franchise info (all-seasons title, poster, year) instead of
+    // the specific season's AniList metadata.
+    await Promise.all(imdbDeduped.map(async (entry) => {
+      if (entry._rootImdbId) {
+        const cType = entry.media.format === 'MOVIE' ? 'movie' : 'series';
+        const cinemeta = await fetchCinemetaMeta(entry._rootImdbId, cType);
+        if (cinemeta) entry._cinemetaMeta = cinemeta;
+      }
+    }));
 
     // Transform AniList entries to Stremio meta format
-    return entries.map(entry => transformToStremioMeta(entry));
+    return imdbDeduped.map(entry => transformToStremioMeta(entry));
 
   } catch (error) {
     // Enhanced error handling with specific error types
@@ -258,6 +484,72 @@ function extractKitsuId(externalLinks) {
   return match ? match[1] : null;
 }
 
+/**
+ * Extracts an IMDB tt-ID from AniList external links.
+ * Returns the full tt-prefixed ID (e.g. "tt9335498"), or null.
+ *
+ * @private
+ * @param {Array<Object>} externalLinks - AniList externalLinks array
+ * @returns {string|null} IMDB ID string (e.g. "tt9335498"), or null
+ */
+function extractImdbId(externalLinks) {
+  if (!Array.isArray(externalLinks)) return null;
+  const imdbLink = externalLinks.find(
+    link => link.site?.toLowerCase() === 'imdb' && link.url
+  );
+  if (!imdbLink) return null;
+  const match = imdbLink.url.match(/imdb\.com\/title\/(tt\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Walks the inline relation data (up to 2 levels of PREQUELs) to find the
+ * franchise root's Kitsu ID. Returns null if the entry is already a root
+ * or no Kitsu ID could be resolved from the inline data.
+ *
+ * @param {Object} media - AniList media object with nested relations.edges[].node.externalLinks
+ * @returns {string|null} Kitsu ID of the root, or null
+ */
+function findRootKitsuIdInline(media) {
+  let current = media;
+  for (let depth = 0; depth < 3; depth++) {
+    const prequelEdge = current.relations?.edges?.find(
+      e => e.relationType === 'PREQUEL' && e.node?.type === 'ANIME'
+    );
+    if (!prequelEdge) {
+      // current IS the root — only return a kitsu ID if we actually traversed (depth > 0)
+      if (depth === 0) return null;
+      return extractKitsuId(current.externalLinks);
+    }
+    current = prequelEdge.node;
+  }
+  // Fell off the end (very deep chain) — use whatever we have
+  return extractKitsuId(current.externalLinks) || null;
+}
+
+/**
+ * Walks the inline relation data (up to 3 levels of PREQUELs) to find the
+ * root entry's IMDB ID. Returns null if the entry is already a root
+ * (own IMDB is handled separately in the caller).
+ *
+ * @param {Object} media - AniList media object with nested relations
+ * @returns {string|null} IMDB tt-ID of the root ancestor, or null
+ */
+function findRootImdbIdInline(media) {
+  let current = media;
+  for (let depth = 0; depth < 3; depth++) {
+    const prequelEdge = current.relations?.edges?.find(
+      e => e.relationType === 'PREQUEL' && e.node?.type === 'ANIME'
+    );
+    if (!prequelEdge) {
+      if (depth === 0) return null; // own IMDB handled by caller
+      return extractImdbId(current.externalLinks);
+    }
+    current = prequelEdge.node;
+  }
+  return extractImdbId(current.externalLinks) || null;
+}
+
 function transformToStremioMeta(entry) {
   const media = entry.media;
   
@@ -281,31 +573,37 @@ function transformToStremioMeta(entry) {
     ? media.description.replace(/<[^>]*>/g, '').trim()
     : '';
 
-  // Prefer kitsu: IDs so stream addons (Comet, MediaFusion, AIO Streams) can
-  // find streams. Fall back to anilist: if no Kitsu link is available.
-  const kitsuId = extractKitsuId(media.externalLinks);
-  const id = kitsuId ? `kitsu:${kitsuId}` : `anilist:${media.id}`;
+  // Prefer IMDB IDs so Cinemeta serves all-seasons metadata in one entry.
+  // Fall back to kitsu: for stream addon compatibility, then anilist: as last resort.
+  const imdbId = entry._rootImdbId || null;
+  const kitsuId = entry._rootKitsuId || extractKitsuId(media.externalLinks);
+  const id = imdbId ? imdbId : kitsuId ? `kitsu:${kitsuId}` : `anilist:${media.id}`;
 
   // Populate reverse cache so stream requests can map kitsu → anilist
-  if (kitsuId) kitsuAnilistCache.set(kitsuId, String(media.id));
+  // Only cache own kitsu→anilist when not using an IMDB ID
+  if (!imdbId && !entry._rootKitsuId && kitsuId) kitsuAnilistCache.set(kitsuId, String(media.id));
 
-  // Use 'movie' for films, 'series' for everything else so stream addons
-  // (Comet, MediaFusion, AIO Streams) recognise the content type.
-  const type = media.format === 'MOVIE' ? 'movie' : 'series';
+  // Use 'series'/'movie' for IMDB entries (Cinemeta routing), 'anime' otherwise
+  const type = imdbId ? (media.format === 'MOVIE' ? 'movie' : 'series') : 'anime';
+
+  // When Cinemeta data is available (IMDB-matched entries), use root franchise
+  // metadata so the catalog card shows e.g. "That Time I Got Reincarnated as a Slime"
+  // with "2018-" instead of "Season 3" with "2024".
+  const cm = entry._cinemetaMeta;
 
   return {
-    id: `anilist:${media.id}`,
-    type: 'anime',
-    name: title,
+    id,
+    type,
+    name: cm?.name || title,
     aliases,
-    poster: media.coverImage.large || media.coverImage.medium,
+    poster: cm?.poster || media.coverImage.large || media.coverImage.medium,
     posterShape: POSTER_SHAPES.PORTRAIT,
-    background: media.bannerImage || media.coverImage.large,
-    description: cleanDescription,
-    genres: media.genres || [],
-    imdbRating: rating,
-    releaseInfo: media.seasonYear ? `${media.seasonYear}` : undefined,
-    year: media.seasonYear,
+    background: cm?.background || media.bannerImage || media.coverImage.large,
+    description: cm?.description || cleanDescription,
+    genres: cm?.genres || media.genres || [],
+    imdbRating: cm?.imdbRating || rating,
+    releaseInfo: cm?.releaseInfo || (media.seasonYear ? `${media.seasonYear}` : undefined),
+    year: cm?.year || media.seasonYear,
     // Mark as watched if user has made any progress
     watched: entry.progress > 0,
     // Additional metadata
@@ -378,14 +676,6 @@ async function getAnimeMeta(id) {
   }
 }
 
-const IMDB_MAP_QUERY = `
-  query ($search: String) {
-    Media(search: $search, type: ANIME) {
-      id
-    }
-  }
-`;
-
 async function mapKitsuToAniList(kitsuId) {
   // Check cache first — populated by catalog fetches
   if (kitsuAnilistCache.has(kitsuId)) {
@@ -454,16 +744,13 @@ async function mapMalIdToAniList(malId) {
 
 async function mapImdbToAniList(imdbId) {
   try {
-    // AniList doesn't have a direct IMDB lookup; search by IMDB ID string as fallback
-    const response = await axios.post(
-      ANILIST_API_URL,
-      { query: IMDB_MAP_QUERY, variables: { search: imdbId } },
-      {
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        timeout: 10000
-      }
-    );
-    return response.data?.data?.Media?.id?.toString() || null;
+    // Use Fribb reverse map (imdb_id → anilist_id) — accurate and no extra API call
+    await loadFribbMap();
+    if (fribbImdbReverseMap?.has(imdbId)) {
+      return fribbImdbReverseMap.get(imdbId);
+    }
+    console.log(`mapImdbToAniList(${imdbId}): not found in Fribb map`);
+    return null;
   } catch (err) {
     console.error(`mapImdbToAniList(${imdbId}):`, err.message);
     return null;
@@ -495,6 +782,128 @@ async function updateProgress(animeId, episode, token) {
     console.error(`updateProgress(${animeId}, ep ${episode}):`, err.message);
     throw err;
   }
+}
+
+const SEQUEL_QUERY = `
+  query ($id: Int) {
+    Media(id: $id, type: ANIME) {
+      relations {
+        edges {
+          relationType
+          node {
+            id
+            type
+          }
+        }
+      }
+    }
+  }
+`;
+
+const MEDIA_RELATIONS_QUERY = `
+  query ($id: Int) {
+    Media(id: $id, type: ANIME) {
+      id
+      externalLinks { url site }
+      relations {
+        edges {
+          relationType
+          node { id type }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Traverses PREQUEL relations upward from a given AniList ID to find the
+ * franchise root (S1). Returns { anilistId, kitsuId } for the root.
+ * Results are cached to avoid redundant API calls.
+ *
+ * @param {number|string} startId - AniList ID to start traversal from
+ * @returns {Promise<{anilistId:string, kitsuId:string|null}|null>}
+ */
+async function findRootMedia(startId) {
+  const cacheKey = String(startId);
+  if (rootMediaCache.has(cacheKey)) return rootMediaCache.get(cacheKey);
+
+  let currentId = parseInt(startId, 10);
+  for (let depth = 0; depth < 5; depth++) {
+    // Retry up to 3 times on 429
+    let response;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await axios.post(
+          ANILIST_API_URL,
+          { query: MEDIA_RELATIONS_QUERY, variables: { id: currentId } },
+          { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, timeout: 10000 }
+        );
+        break;
+      } catch (err) {
+        if (err.response?.status === 429 && attempt < 2) {
+          const wait = (attempt + 1) * 2000;
+          console.warn(`AniList 429 in findRootMedia(${currentId}), retrying in ${wait}ms...`);
+          await new Promise(r => setTimeout(r, wait));
+        } else {
+          console.error(`findRootMedia traversal failed at AniList id ${currentId}:`, err.message);
+          return null;
+        }
+      }
+    }
+    if (!response) return null;
+    const media = response.data?.data?.Media;
+    if (!media) break;
+    const prequelEdge = media.relations?.edges?.find(
+      e => e.relationType === 'PREQUEL' && e.node?.type === 'ANIME'
+    );
+    if (!prequelEdge) {
+      // This node has no prequel — it IS the root
+      const kitsuId = extractKitsuId(media.externalLinks);
+      const result = { anilistId: String(media.id), kitsuId };
+      rootMediaCache.set(cacheKey, result);
+      rootMediaCache.set(String(media.id), result);
+      return result;
+    }
+    currentId = prequelEdge.node.id;
+  }
+  return null;
+}
+
+/**
+ * Traverses AniList's sequel chain to find the AniList ID for a specific season.
+ * Season 1 = rootId, Season 2 = first sequel, Season 3 = second sequel, etc.
+ *
+ * @param {string} rootId - AniList ID of the root/first season
+ * @param {number} season - Season number (1-based)
+ * @returns {Promise<string>} AniList ID for the requested season (or last known if chain ends early)
+ */
+async function getSeasonAniListId(rootId, season) {
+  if (!season || season <= 1) return rootId;
+  let currentId = rootId;
+  for (let i = 1; i < season; i++) {
+    try {
+      const response = await axios.post(
+        ANILIST_API_URL,
+        { query: SEQUEL_QUERY, variables: { id: parseInt(currentId, 10) } },
+        {
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          timeout: 10000
+        }
+      );
+      const edges = response.data?.data?.Media?.relations?.edges || [];
+      const sequel = edges.find(e => e.relationType === 'SEQUEL' && e.node?.type === 'ANIME');
+      if (!sequel) {
+        console.log(`No ANIME sequel found for AniList ID ${currentId} at season ${i + 1}, using last resolved ID`);
+        break;
+      }
+      currentId = String(sequel.node.id);
+      console.log(`Season ${i + 1} resolved to AniList ID ${currentId}`);
+    } catch (err) {
+      console.error(`getSeasonAniListId failed at season ${i + 1}:`, err.message);
+      break;
+    }
+  }
+  return currentId;
 }
 
 const ANILIST_TO_MAL_QUERY = `
@@ -530,7 +939,9 @@ module.exports = {
   mapKitsuToAniList,
   mapImdbToAniList,
   mapAniListToMal,
-  updateProgress
+  getSeasonAniListId,
+  updateProgress,
+  getImdbForKitsuId
 };
 
 // Made with Bob
