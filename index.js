@@ -793,20 +793,9 @@ app.get('/combined/:config/meta/:type/:id.json', async (req, res) => {
   const svcConfig = parseCombinedConfig(req.params.config);
   if (!svcConfig) return res.status(HTTP_STATUS.BAD_REQUEST).json({ error: 'Invalid combined config.' });
   const { type, id } = req.params;
-  // Determine service from ID prefix
-  let service = 'anilist';
-  if (id.startsWith('mal:') || id.startsWith('kitsu:')) {
-    service = svcConfig.mal ? 'mal' : 'anilist';
-  } else if (id.startsWith('tt')) {
-    service = svcConfig.imdb ? 'imdb' : 'anilist';
-  }
-  const token = svcConfig[service];
-  if (!token) return res.json({ meta: null });
   try {
-    const userParam = resolveServiceToken(service, token);
-    if ((service === 'mal' || service === 'letterboxd') && !userParam) return res.json({ meta: null });
-    const meta = await addonInterface.getMeta(type, id, userParam, service, config.malClientId);
-    res.json(meta);
+    const result = await addonInterface.getCombinedMeta(type, id, svcConfig, config.malClientId);
+    res.json(result);
   } catch (error) {
     console.error('Combined meta error:', error.message);
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ error: error.message || 'Failed to fetch meta' });

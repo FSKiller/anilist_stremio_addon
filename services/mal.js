@@ -13,6 +13,9 @@
 const axios = require('axios');
 const { MAL_API_URL, POSTER_SHAPES } = require('../config/constants');
 const tokenManager = require('../config/tokens');
+const mappingsStore = require('../config/mappings');
+const { mapKitsuToAniList } = require('./anilist');
+const { buildMultiSeasonVideos } = require('./meta');
 
 const KITSU_API_URL = 'https://kitsu.io/api/edge';
 const KITSU_BATCH_SIZE = 20;
@@ -244,9 +247,21 @@ async function fetchKitsuMeta(id) {
     ? attrs.synopsis.replace(/<[^>]*>/g, '').trim()
     : '';
 
+  // Build multi-season videos by mapping Kitsu→AniList and walking the SEQUEL chain.
+  // This surfaces all seasons even when Kitsu only knows about the root entry.
+  let videos;
+  try {
+    const anilistId = await mapKitsuToAniList(kitsuId);
+    if (anilistId) {
+      videos = await buildMultiSeasonVideos(anilistId, id);
+    }
+  } catch (err) {
+    console.warn(`fetchKitsuMeta: could not build videos for kitsu:${kitsuId}: ${err.message}`);
+  }
+
   return {
     id,
-    type: 'anime',
+    type: attrs.subtype === 'movie' ? 'movie' : 'series',
     name: title,
     poster: attrs.posterImage?.large || attrs.posterImage?.medium,
     posterShape: POSTER_SHAPES.PORTRAIT,
@@ -254,7 +269,8 @@ async function fetchKitsuMeta(id) {
     description: cleanDescription,
     imdbRating: rating,
     releaseInfo: year ? `${year}` : undefined,
-    year
+    year,
+    ...(videos && videos.length > 0 && { videos })
   };
 }
 
@@ -271,10 +287,30 @@ async function fetchKitsuMeta(id) {
 async function fetchKitsuIdMap(malIds) {
   if (!malIds.length) return {};
 
+  // Seed from persistent store — skip any IDs we already know
+  const persistent = mappingsStore.getMalKitsuMap();
   const map = {};
+  const missing = [];
+  for (const id of malIds) {
+    const stored = persistent[String(id)];
+    if (stored !== undefined) {
+      if (stored) map[String(id)] = stored; // null = known-no-mapping, skip
+    } else {
+      missing.push(id);
+    }
+  }
+
+  if (missing.length === 0) {
+    console.log(`Kitsu ID mapping: ${Object.keys(map).length}/${malIds.length} from cache (no API calls needed)`);
+    return map;
+  }
+
+  console.log(`Kitsu ID mapping: ${malIds.length - missing.length} cached, fetching ${missing.length} from Kitsu API`);
+
+  const newEntries = {};
   const chunks = [];
-  for (let i = 0; i < malIds.length; i += KITSU_BATCH_SIZE) {
-    chunks.push(malIds.slice(i, i + KITSU_BATCH_SIZE));
+  for (let i = 0; i < missing.length; i += KITSU_BATCH_SIZE) {
+    chunks.push(missing.slice(i, i + KITSU_BATCH_SIZE));
   }
 
   await Promise.all(chunks.map(async (chunk) => {
@@ -283,7 +319,6 @@ async function fetchKitsuIdMap(malIds) {
       // but Kitsu requires literal commas for multi-value filters.
       const qs = `filter[externalSite]=myanimelist/anime&filter[externalId]=${chunk.join(',')}&include=item&page[limit]=${KITSU_BATCH_SIZE}`;
       const url = `${KITSU_API_URL}/mappings?${qs}`;
-      console.log(`Kitsu batch URL: ${url}`);
       const response = await axios.get(url, {
         headers: { 'Accept': 'application/vnd.api+json' },
         timeout: 10000
@@ -294,6 +329,7 @@ async function fetchKitsuIdMap(malIds) {
         const malId = item.attributes?.externalId;
         const kitsuId = item.relationships?.item?.data?.id;
         if (kitsuId && malId != null) {
+          newEntries[String(malId)] = String(kitsuId);
           map[String(malId)] = String(kitsuId);
         }
       }
@@ -301,6 +337,13 @@ async function fetchKitsuIdMap(malIds) {
       console.warn(`Kitsu ID batch lookup failed: ${err.message}`);
     }
   }));
+
+  // Store null sentinel for IDs confirmed to have no Kitsu mapping so we
+  // don't re-query them on the next catalog load.
+  for (const id of missing) {
+    if (!(String(id) in newEntries)) newEntries[String(id)] = null;
+  }
+  mappingsStore.setMalKitsuEntries(newEntries);
 
   return map;
 }

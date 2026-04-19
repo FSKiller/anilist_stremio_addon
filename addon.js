@@ -262,6 +262,23 @@ async function getMeta(type, id, username, service, malClientId) {
     }
 
     // Default: AniList
+    // AniList catalog entries resolve to kitsu: IDs when no IMDB mapping exists.
+    // Map kitsu→anilist so we can serve multi-season meta from getAnimeMeta().
+    if (id.startsWith('kitsu:')) {
+      try {
+        const kitsuId = id.replace('kitsu:', '');
+        const anilistId = await anilistService.mapKitsuToAniList(kitsuId);
+        if (anilistId) {
+          const meta = await anilistService.getAnimeMeta(`anilist:${anilistId}`);
+          // Preserve the original kitsu: id so stream progress still routes correctly
+          if (meta) return { meta: { ...meta, id } };
+        }
+      } catch (err) {
+        console.warn(`getMeta: kitsu→anilist failed for ${id}: ${err.message}`);
+      }
+      return { meta: null };
+    }
+
     if (!id.startsWith('anilist:')) {
       return { meta: null };
     }
@@ -713,6 +730,93 @@ async function getCombinedStream(type, id, videoInfo, svcConfig, malClientId) {
 }
 
 /**
+ * Handles meta requests for the combined addon.
+ *
+ * Unlike the single-service getMeta(), this function tries multiple services
+ * in priority order so that entries survive even when one service is missing
+ * data (e.g. Kitsu only knows about S1 while AniList has the full SEQUEL chain).
+ *
+ * - tt* IDs   → null (Stremio resolves these natively via Cinemeta)
+ * - kitsu: IDs → MAL service (Kitsu API + AniList-backed videos) → AniList fallback
+ * - anilist: IDs → AniList service (with multi-season videos)
+ * - mal: IDs   → MAL service
+ *
+ * @async
+ * @param {string} type - Content type ("anime", "series", "movie")
+ * @param {string} id - Stremio content ID
+ * @param {Object} svcConfig - Combined service config (keys: anilist, mal, imdb, letterboxd)
+ * @param {string} malClientId - MAL API Client ID
+ * @returns {Promise<{meta: Object|null}>}
+ */
+async function getCombinedMeta(type, id, svcConfig, malClientId) {
+  try {
+    console.log(`Combined meta request - Type: ${type}, ID: ${id}`);
+
+    if (type !== 'anime' && type !== 'series' && type !== 'movie') {
+      return { meta: null };
+    }
+
+    // tt* IDs: Stremio resolves these natively via Cinemeta — nothing to do here
+    if (/^tt\d+/.test(id)) return { meta: null };
+
+    // kitsu: IDs — try MAL service first (has Kitsu API + AniList-backed videos),
+    // then fall back to mapping Kitsu→AniList for enriched meta with season chain
+    if (id.startsWith('kitsu:')) {
+      if (malClientId) {
+        try {
+          const meta = await malService.getAnimeMeta(id, malClientId);
+          if (meta) return { meta };
+        } catch (err) {
+          console.warn(`getCombinedMeta: kitsu via mal service failed: ${err.message}`);
+        }
+      }
+      // Fallback: map Kitsu→AniList and use AniList meta (also has multi-season videos)
+      if (svcConfig.anilist) {
+        try {
+          const kitsuId = id.replace('kitsu:', '');
+          const anilistId = await anilistService.mapKitsuToAniList(kitsuId);
+          if (anilistId) {
+            const meta = await anilistService.getAnimeMeta(`anilist:${anilistId}`);
+            // Preserve the original kitsu: id so stream progress still routes correctly
+            if (meta) return { meta: { ...meta, id } };
+          }
+        } catch (err) {
+          console.warn(`getCombinedMeta: kitsu→anilist fallback failed: ${err.message}`);
+        }
+      }
+      return { meta: null };
+    }
+
+    // anilist: IDs — fetch directly with multi-season video support
+    if (id.startsWith('anilist:')) {
+      try {
+        const meta = await anilistService.getAnimeMeta(id);
+        return { meta };
+      } catch (err) {
+        console.error(`getCombinedMeta: anilist failed: ${err.message}`);
+        return { meta: null };
+      }
+    }
+
+    // mal: IDs — MAL service
+    if (id.startsWith('mal:') && malClientId) {
+      try {
+        const meta = await malService.getAnimeMeta(id, malClientId);
+        return { meta };
+      } catch (err) {
+        console.error(`getCombinedMeta: mal failed: ${err.message}`);
+        return { meta: null };
+      }
+    }
+
+    return { meta: null };
+  } catch (error) {
+    console.error(`Error in getCombinedMeta (${type}/${id}):`, error.message);
+    return { meta: null };
+  }
+}
+
+/**
  * Exported addon interface
  * 
  * This object provides the public API for the Stremio addon,
@@ -726,6 +830,7 @@ module.exports = {
   getCombinedStream,
   getCatalog,
   getMeta,
+  getCombinedMeta,
   getStream
 };
 

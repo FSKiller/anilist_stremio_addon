@@ -9,6 +9,8 @@
 
 const axios = require('axios');
 const { ANILIST_API_URL, ANILIST_STATUS, POSTER_SHAPES } = require('../config/constants');
+const mappingsStore = require('../config/mappings');
+const { buildMultiSeasonVideos } = require('./meta');
 
 /**
  * GraphQL query to fetch user's currently watching anime
@@ -92,6 +94,47 @@ async function loadFribbMap() {
 function getImdbForKitsuId(kitsuId) {
   if (!fribbKitsuToImdbMap) return null;
   return fribbKitsuToImdbMap.get(String(kitsuId)) || null;
+}
+
+/**
+ * Looks up the IMDB ID for a Kitsu ID by querying the Kitsu mappings API.
+ * Result (including "not found") is stored in the persistent mappings store
+ * so the API is only ever called once per Kitsu ID.
+ *
+ * @param {string} kitsuId
+ * @returns {Promise<string|null>}
+ */
+async function fetchImdbForKitsuId(kitsuId) {
+  // 1. Already in Fribb map (free, synchronous)
+  const fribbImdb = getImdbForKitsuId(kitsuId);
+  if (fribbImdb) return fribbImdb;
+
+  // 2. Persistent store — undefined = never queried, null = confirmed absent
+  const stored = mappingsStore.getKitsuImdbId(kitsuId);
+  if (stored !== undefined) return stored; // null or a tt* string
+
+  // 3. Ask Kitsu's mappings endpoint
+  try {
+    const resp = await axios.get(
+      `https://kitsu.io/api/edge/anime/${encodeURIComponent(kitsuId)}/mappings`,
+      { headers: { 'Accept': 'application/vnd.api+json' }, timeout: 8000 }
+    );
+    for (const item of resp.data?.data || []) {
+      const site = item.attributes?.externalSite || '';
+      const extId = item.attributes?.externalId || '';
+      // Kitsu uses 'imdb' or 'imdb/shows' or 'imdb/movies'
+      if (site.startsWith('imdb') && /^tt\d+/.test(extId)) {
+        console.log(`Kitsu:${kitsuId} → IMDB:${extId} (kitsu mappings API)`);
+        mappingsStore.setKitsuImdbId(kitsuId, extId);
+        return extId;
+      }
+    }
+  } catch (err) {
+    console.warn(`fetchImdbForKitsuId(${kitsuId}): ${err.message}`);
+  }
+  // Record that no mapping exists so we don't retry
+  mappingsStore.setKitsuImdbId(kitsuId, null);
+  return null;
 }
 
 function fribbLookup(anilistId) {
@@ -375,16 +418,23 @@ async function getAnimeList(token, status) {
       const rootImdbId = fribbImdbId || inlineImdbId;
       const rootKitsuId = inlineKitsuId || extractKitsuId(entry.media.externalLinks) || fribbKitsuId;
 
-      if (!rootKitsuId && !rootImdbId) {
+      // Extra fallback: if Fribb / inline traversal gave no IMDB but we have a Kitsu ID,
+      // ask Kitsu's own mappings endpoint (result persisted so it's only fetched once).
+      let resolvedImdbId = rootImdbId;
+      if (!resolvedImdbId && rootKitsuId) {
+        resolvedImdbId = await fetchImdbForKitsuId(rootKitsuId);
+      }
+
+      if (!rootKitsuId && !resolvedImdbId) {
         finalEntries.push(entry);
         continue;
       }
-      if (rootImdbId) console.log(`AniList:${entry.media.id} → IMDB:${rootImdbId} (${fribbImdbId ? 'fribb' : 'inline'})`);
+      if (resolvedImdbId) console.log(`AniList:${entry.media.id} → IMDB:${resolvedImdbId} (${fribbImdbId ? 'fribb' : rootImdbId ? 'inline' : 'kitsu-api'})`);
       if (rootKitsuId) console.log(`AniList:${entry.media.id} → kitsu:${rootKitsuId}`);
       finalEntries.push({
         ...entry,
         ...(rootKitsuId ? { _rootKitsuId: rootKitsuId } : {}),
-        ...(rootImdbId ? { _rootImdbId: rootImdbId } : {})
+        ...(resolvedImdbId ? { _rootImdbId: resolvedImdbId } : {})
       });
     }
 
@@ -659,6 +709,10 @@ async function getAnimeMeta(id) {
       ? media.description.replace(/<[^>]*>/g, '').trim()
       : '';
 
+    // Build multi-season videos by walking the AniList SEQUEL chain.
+    // This lets Stremio display all seasons even when Kitsu/Cinemeta only know about S1.
+    const videos = await buildMultiSeasonVideos(anilistId, id);
+
     return {
       id,
       type: 'series',
@@ -668,7 +722,8 @@ async function getAnimeMeta(id) {
       background: media.bannerImage,
       genres: media.genres || [],
       imdbRating: rating,
-      releaseInfo: media.seasonYear ? String(media.seasonYear) : undefined
+      releaseInfo: media.seasonYear ? String(media.seasonYear) : undefined,
+      ...(videos.length > 0 && { videos })
     };
   } catch (error) {
     console.error(`Error fetching anime meta for ${id}:`, error.message);
@@ -676,10 +731,55 @@ async function getAnimeMeta(id) {
   }
 }
 
+// Cache AniList ID → Kitsu ID (populated by mapAniListToKitsu)
+const anilistKitsuCache = new Map();
+
+/**
+ * Returns the Kitsu ID for a given AniList ID.
+ * Checks Fribb map first; falls back to Kitsu mappings API.
+ *
+ * @param {string|number} anilistId
+ * @returns {Promise<string|null>}
+ */
+async function mapAniListToKitsu(anilistId) {
+  const key = String(anilistId);
+  if (anilistKitsuCache.has(key)) return anilistKitsuCache.get(key);
+
+  // 1. Fribb map (fast, no extra API call)
+  const map = await loadFribbMap();
+  const entry = map.get(parseInt(anilistId, 10));
+  if (entry?.kitsu_id) {
+    anilistKitsuCache.set(key, entry.kitsu_id);
+    return entry.kitsu_id;
+  }
+
+  // 2. Kitsu mappings API fallback
+  try {
+    const qs = `filter[externalSite]=anilist/anime&filter[externalId]=${encodeURIComponent(anilistId)}&include=item&page[limit]=1`;
+    const response = await axios.get(
+      `https://kitsu.io/api/edge/mappings?${qs}`,
+      { headers: { 'Accept': 'application/vnd.api+json' }, timeout: 10000 }
+    );
+    const kitsuId = response.data?.data?.[0]?.relationships?.item?.data?.id;
+    const result = kitsuId ? String(kitsuId) : null;
+    anilistKitsuCache.set(key, result);
+    return result;
+  } catch (err) {
+    console.warn(`mapAniListToKitsu(${anilistId}): ${err.message}`);
+    return null;
+  }
+}
+
 async function mapKitsuToAniList(kitsuId) {
-  // Check cache first — populated by catalog fetches
+  // 1. In-memory cache — populated by catalog fetches
   if (kitsuAnilistCache.has(kitsuId)) {
     return kitsuAnilistCache.get(kitsuId);
+  }
+  // 2. Persistent store — survives restarts
+  const stored = mappingsStore.getKitsuAnilistId(kitsuId);
+  if (stored) {
+    kitsuAnilistCache.set(kitsuId, stored);
+    return stored;
   }
   try {
     // Use ?include=mappings (standard JSON:API) to get mapping data
@@ -697,6 +797,7 @@ async function mapKitsuToAniList(kitsuId) {
     if (anilistMapping) {
       const anilistId = anilistMapping.attributes.externalId;
       kitsuAnilistCache.set(kitsuId, anilistId);
+      mappingsStore.setKitsuAnilistId(kitsuId, anilistId);
       return anilistId;
     }
     // Fallback: try MAL mapping → AniList idMal lookup
@@ -707,6 +808,7 @@ async function mapKitsuToAniList(kitsuId) {
       const anilistId = await mapMalIdToAniList(parseInt(malMapping.attributes.externalId, 10));
       if (anilistId) {
         kitsuAnilistCache.set(kitsuId, anilistId);
+        mappingsStore.setKitsuAnilistId(kitsuId, anilistId);
         return anilistId;
       }
     }
